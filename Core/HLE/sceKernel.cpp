@@ -972,7 +972,7 @@ void Register_ExceptionManagerForKernel()
 
 // Seen in some homebrew
 const HLEFunction UtilsForKernel[] = {
-	{0xC2DF770E, 0, "sceKernelIcacheInvalidateRange"},
+	{0xC2DF770E, WrapI_UI<sceKernelIcacheInvalidateRange>, "sceKernelIcacheInvalidateRange"},
 	{0x78934841, 0, "sceKernelGzipDecompress"},
 	{0xe8db3ce6, 0, "sceKernelDeflateDecompress"},
 	{0x840259f1, 0, "sceKernelUtilsSha1Digest"},
@@ -1002,5 +1002,4 @@ void Register_UtilsForKernel()
 void Register_ThreadManForKernel()
 {
 	RegisterModule("ThreadManForKernel", ARRAY_SIZE(ThreadManForKernel), ThreadManForKernel);		
-
 }
