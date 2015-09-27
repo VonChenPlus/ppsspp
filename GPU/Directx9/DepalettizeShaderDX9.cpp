@@ -20,7 +20,6 @@
 #include "base/logging.h"
 #include "Common/Log.h"
 #include "Core/Reporting.h"
-#include "GPU/GPUState.h"
 #include "GPU/Directx9/TextureCacheDX9.h"
 #include "GPU/Directx9/DepalettizeShaderDX9.h"
 #include "GPU/Common/DepalettizeShaderCommon.h"
@@ -64,13 +63,12 @@ DepalShaderCacheDX9::~DepalShaderCacheDX9() {
 	}
 }
 
-u32 DepalShaderCacheDX9::GenerateShaderID(GEBufferFormat pixelFormat) {
-	return (gstate.clutformat & 0xFFFFFF) | (pixelFormat << 24);
+u32 DepalShaderCacheDX9::GenerateShaderID(GEPaletteFormat clutFormat, GEBufferFormat pixelFormat) {
+	return (clutFormat & 0xFFFFFF) | (pixelFormat << 24);
 }
 
-LPDIRECT3DTEXTURE9 DepalShaderCacheDX9::GetClutTexture(const u32 clutID, u32 *rawClut) {
-	GEPaletteFormat palFormat = gstate.getClutPaletteFormat();
-	const u32 realClutID = clutID ^ palFormat;
+LPDIRECT3DTEXTURE9 DepalShaderCacheDX9::GetClutTexture(GEPaletteFormat clutFormat, const u32 clutID, u32 *rawClut) {
+	const u32 realClutID = clutID ^ clutFormat;
 
 	auto oldtex = texCache_.find(realClutID);
 	if (oldtex != texCache_.end()) {
@@ -78,8 +76,8 @@ LPDIRECT3DTEXTURE9 DepalShaderCacheDX9::GetClutTexture(const u32 clutID, u32 *ra
 		return oldtex->second->texture;
 	}
 
-	D3DFORMAT dstFmt = DX9::getClutDestFormat(palFormat);
-	int texturePixels = palFormat == GE_CMODE_32BIT_ABGR8888 ? 256 : 512;
+	D3DFORMAT dstFmt = DX9::getClutDestFormat(clutFormat);
+	int texturePixels = clutFormat == GE_CMODE_32BIT_ABGR8888 ? 256 : 512;
 
 	DepalTextureDX9 *tex = new DepalTextureDX9();
 
@@ -94,6 +92,7 @@ LPDIRECT3DTEXTURE9 DepalShaderCacheDX9::GetClutTexture(const u32 clutID, u32 *ra
 	HRESULT hr = pD3Ddevice->CreateTexture(texturePixels, 1, 1, usage, (D3DFORMAT)D3DFMT(dstFmt), pool, &tex->texture, NULL);
 	if (FAILED(hr)) {
 		ERROR_LOG(G3D, "Failed to create D3D texture for depal");
+		delete tex;
 		return nullptr;
 	}
 
@@ -101,13 +100,14 @@ LPDIRECT3DTEXTURE9 DepalShaderCacheDX9::GetClutTexture(const u32 clutID, u32 *ra
 	hr = tex->texture->LockRect(0, &rect, NULL, 0);
 	if (FAILED(hr)) {
 		ERROR_LOG(G3D, "Failed to lock D3D texture for depal");
+		delete tex;
 		return nullptr;
 	}
 	// Regardless of format, the CLUT should always be 1024 bytes.
 	memcpy(rect.pBits, rawClut, 1024);
 	tex->texture->UnlockRect(0);
 
-	pD3Ddevice->SetSamplerState(1, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+	pD3Ddevice->SetSamplerState(1, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
 	pD3Ddevice->SetSamplerState(1, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
 	pD3Ddevice->SetSamplerState(1, D3DSAMP_MINFILTER, D3DTEXF_POINT);
 	pD3Ddevice->SetSamplerState(1, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
@@ -142,8 +142,8 @@ void DepalShaderCacheDX9::Decimate() {
 	}
 }
 
-LPDIRECT3DPIXELSHADER9 DepalShaderCacheDX9::GetDepalettizePixelShader(GEBufferFormat pixelFormat) {
-	u32 id = GenerateShaderID(pixelFormat);
+LPDIRECT3DPIXELSHADER9 DepalShaderCacheDX9::GetDepalettizePixelShader(GEPaletteFormat clutFormat, GEBufferFormat pixelFormat) {
+	u32 id = GenerateShaderID(clutFormat, pixelFormat);
 
 	auto shader = cache_.find(id);
 	if (shader != cache_.end()) {

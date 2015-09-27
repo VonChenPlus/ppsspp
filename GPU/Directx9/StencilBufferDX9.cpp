@@ -18,7 +18,7 @@
 #include "base/logging.h"
 
 #include "helper/dx_state.h"
-#include "helper/fbo.h"
+#include "helper/dx_fbo.h"
 #include "Core/Reporting.h"
 #include "GPU/Directx9/FramebufferDX9.h"
 #include "GPU/Directx9/PixelShaderGeneratorDX9.h"
@@ -261,7 +261,7 @@ bool FramebufferManagerDX9::NotifyStencilUpload(u32 addr, int size, bool skipZer
 			continue;
 		}
 		if (dstBuffer->format == GE_FORMAT_4444) {
-			dxstate.stencilMask.set(Convert4To8(i));
+			dxstate.stencilMask.set(i | (i << 4));
 			const float f[4] = {i * (16.0f / 255.0f)};
 			pD3Ddevice->SetPixelShaderConstantF(CONST_PS_STENCILVALUE, f, 1);
 		} else if (dstBuffer->format == GE_FORMAT_5551) {

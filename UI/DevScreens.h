@@ -31,9 +31,8 @@ class DevMenu : public PopupScreen {
 public:
 	DevMenu() : PopupScreen("Dev Tools") {}
 
-	virtual void CreatePopupContents(UI::ViewGroup *parent);
-
-	virtual void dialogFinished(const Screen *dialog, DialogResult result);
+	void CreatePopupContents(UI::ViewGroup *parent) override;
+	void dialogFinished(const Screen *dialog, DialogResult result) override;
 
 protected:
 	UI::EventReturn OnLogView(UI::EventParams &e);
@@ -48,7 +47,7 @@ protected:
 class LogConfigScreen : public UIDialogScreenWithBackground {
 public:
 	LogConfigScreen() {}
-	virtual void CreateViews();
+	virtual void CreateViews() override;
 
 private:
 	UI::EventReturn OnToggleAll(UI::EventParams &e);
@@ -98,7 +97,7 @@ public:
 
 protected:
 	virtual void CreatePopupContents(UI::ViewGroup *parent) override;
-	virtual void OnCompleted(DialogResult result);
+	virtual void OnCompleted(DialogResult result) override;
 	UI::EventReturn OnDigitButton(UI::EventParams &e);
 	UI::EventReturn OnBackspace(UI::EventParams &e);
 
@@ -115,18 +114,22 @@ private:
 class JitCompareScreen : public UIDialogScreenWithBackground {
 public:
 	JitCompareScreen() : currentBlock_(-1) {}
-	virtual void CreateViews();
+	virtual void CreateViews() override;
 
 private:
 	void UpdateDisasm();
 	UI::EventReturn OnRandomBlock(UI::EventParams &e);
+	UI::EventReturn OnRandomFPUBlock(UI::EventParams &e);
 	UI::EventReturn OnRandomVFPUBlock(UI::EventParams &e);
+	void OnRandomBlock(int flag);
+
 	UI::EventReturn OnCurrentBlock(UI::EventParams &e);
 	UI::EventReturn OnSelectBlock(UI::EventParams &e);
 	UI::EventReturn OnPrevBlock(UI::EventParams &e);
 	UI::EventReturn OnNextBlock(UI::EventParams &e);
 	UI::EventReturn OnBlockAddress(UI::EventParams &e);
 	UI::EventReturn OnAddressChange(UI::EventParams &e);
+	UI::EventReturn OnShowStats(UI::EventParams &e);
 
 	int currentBlock_;
 
@@ -134,6 +137,9 @@ private:
 	UI::TextEdit *blockAddr_;
 	UI::TextView *blockStats_;
 
-	UI::LinearLayout *leftDisasm_;	
-	UI::LinearLayout *rightDisasm_;	
+	UI::LinearLayout *leftDisasm_;
+	UI::LinearLayout *rightDisasm_;
 };
+
+
+void DrawProfile(UIContext &ui);

@@ -24,6 +24,7 @@
 #include "file/vfs.h"
 #include "file/zip_read.h"
 #include "base/NativeApp.h"
+#include "profiler/profiler.h"
 #include "thread/threadutil.h"
 #include "util/text/utf8.h"
 
@@ -40,7 +41,7 @@
 
 #include "Windows/resource.h"
 
-#include "Windows/WndMainWindow.h"
+#include "Windows/MainWindow.h"
 #include "Windows/Debugger/Debugger_Disasm.h"
 #include "Windows/Debugger/Debugger_MemoryDlg.h"
 #include "Windows/Debugger/Debugger_VFPUDlg.h"
@@ -111,6 +112,7 @@ std::string GetWindowsVersion() {
 	const bool IsWindows7SP1 = DoesVersionMatchWindows(6, 1, 1, 0);
 	const bool IsWindows8 = DoesVersionMatchWindows(6, 2);
 	const bool IsWindows8_1 = DoesVersionMatchWindows(6, 3);
+	const bool IsWindows10 = DoesVersionMatchWindows(10, 0);
 
 	if (IsWindowsXPSP2)
 		return "Microsoft Windows XP, Service Pack 2";
@@ -138,6 +140,9 @@ std::string GetWindowsVersion() {
 
 	if (IsWindows8_1)
 		return "Microsoft Windows 8.1";
+
+	if (IsWindows10)
+		return "Microsoft Windows 10";
 
 	return "Unsupported version of Microsoft Windows.";
 }
@@ -202,7 +207,7 @@ std::string GetVideoCardDriverVersion() {
 		hr = pEnum->Next(WBEM_INFINITE, 1, &pObj, &uReturned);
 	}
 
-	if (uReturned && !FAILED(hr)) {
+	if (!FAILED(hr) && uReturned) {
 		hr = pObj->Get(L"DriverVersion", 0, &var, NULL, NULL);
 		if (SUCCEEDED(hr)) {
 			char str[MAX_PATH];
@@ -342,6 +347,7 @@ int WINAPI WinMain(HINSTANCE _hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLin
 
 	CoInitializeEx(NULL, COINIT_MULTITHREADED);
 
+	PROFILE_INIT();
 
 	// FMA3 support in the 2013 CRT is broken on Vista and Windows 7 RTM (fixed in SP1). Just disable it.
 #ifdef _M_X64

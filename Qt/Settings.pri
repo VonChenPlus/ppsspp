@@ -1,6 +1,18 @@
 VERSION = 1.0.1.0
 DEFINES += USING_QT_UI USE_FFMPEG
 
+exists( /usr/include/snappy-c.h ) {
+	DEFINES += SHARED_SNAPPY
+}
+
+unix:contains(QT_CONFIG, system-zlib) {
+	DEFINES += SHARED_ZLIB
+}
+
+exists( /usr/include/zip.h ) {
+	DEFINES += SHARED_LIBZIP
+}
+
 # Global specific
 win32:CONFIG(release, debug|release): CONFIG_DIR = $$join(OUT_PWD,,,/release)
 else:win32:CONFIG(debug, debug|release): CONFIG_DIR = $$join(OUT_PWD,,,/debug)
@@ -12,7 +24,8 @@ RCC_DIR = $$CONFIG_DIR/.rcc/$$TARGET
 QMAKE_CLEAN += -r $$OBJECTS_DIR $$MOC_DIR $$UI_DIR $$RCC_DIR
 
 P = $$_PRO_FILE_PWD_/..
-INCLUDEPATH += $$P/ext/zlib $$P/Common
+INCLUDEPATH += $$P/Common
+win32|contains(QT_CONFIG, no-zlib): INCLUDEPATH += $$P/ext/zlib
 
 # Work out arch name
 include(Platform/ArchDetection.pri)

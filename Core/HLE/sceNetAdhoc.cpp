@@ -21,7 +21,7 @@
 // This is a direct port of Coldbird's code from http://code.google.com/p/aemu/
 // All credit goes to him!
 #include "Core/Core.h"
-#include "Core/MemMap.h"
+#include "Core/MemMapHelpers.h"
 #include "Common/ChunkFile.h"
 #include "Core/MIPS/MIPSCodeUtils.h"
 
@@ -53,7 +53,7 @@ SceUID threadAdhocID;
 recursive_mutex adhocEvtMtx;
 std::vector<std::pair<u32, u32>> adhocctlEvents;
 std::vector<u64> matchingEvents;
-u32 dummyThreadHackAddr;
+u32 dummyThreadHackAddr = 0;
 u32_le dummyThreadCode[3];
 
 std::map<int, AdhocctlHandler> adhocctlHandlers;
@@ -84,11 +84,14 @@ void __NetAdhocShutdown() {
 	if (netAdhocInited) {
 		sceNetAdhocTerm();
 	}
-	kernelMemory.Free(dummyThreadHackAddr);
+	if (dummyThreadHackAddr) {
+		kernelMemory.Free(dummyThreadHackAddr);
+		dummyThreadHackAddr = 0;
+	}
 }
 
 void __NetAdhocDoState(PointerWrap &p) {
-	auto s = p.Section("sceNetAdhoc", 1);
+	auto s = p.Section("sceNetAdhoc", 1, 2);
 	if (!s)
 		return;
 
@@ -97,12 +100,21 @@ void __NetAdhocDoState(PointerWrap &p) {
 	p.Do(netAdhocMatchingInited);
 	p.Do(adhocctlHandlers);
 
-	//p.Do(actionAfterMatchingMipsCall); // This could cause incompatibility with old savestate right?
-	//__KernelRestoreActionType(actionAfterMatchingMipsCall, AfterMatchingMipsCall::Create);
+	if (s >= 2) {
+		p.Do(actionAfterMatchingMipsCall);
+		__KernelRestoreActionType(actionAfterMatchingMipsCall, AfterMatchingMipsCall::Create);
 
-	//u32 blockSize = sizeof(dummyThreadCode);
-	//dummyThreadHackAddr = kernelMemory.Alloc(blockSize, false, "dummythreadhack");
-	Memory::Memcpy(dummyThreadHackAddr, dummyThreadCode, sizeof(dummyThreadCode));
+		p.Do(dummyThreadHackAddr);
+	} else if (p.mode == p.MODE_READ) {
+		// Previously, this wasn't being saved.  It needs its own space.
+		if (strcmp("dummythreadhack", kernelMemory.GetBlockTag(dummyThreadHackAddr)) != 0) {
+			u32 blockSize = sizeof(dummyThreadCode);
+			dummyThreadHackAddr = kernelMemory.Alloc(blockSize, false, "dummythreadhack");
+		}
+	}
+	if (dummyThreadHackAddr) {
+		Memory::Memcpy(dummyThreadHackAddr, dummyThreadCode, sizeof(dummyThreadCode));
+	}
 }
 
 void __UpdateAdhocctlHandlers(u32 flag, u32 error) {
@@ -380,7 +392,7 @@ static int sceNetAdhocPdpSend(int id, const char *mac, u32 port, void *data, int
 		return -1;
 	}
 	SceNetEtherAddr * daddr = (SceNetEtherAddr *)mac;
-	uint16 dport = (uint16)port;
+	uint16_t dport = (uint16_t)port;
 	
 	//if (dport < 7) dport += 1341;
 
@@ -4785,9 +4797,7 @@ int matchingEventThread(int matchingId)
 					if (msg->optlen > 0) opt = ((u8 *)msg) + sizeof(ThreadMessage); //&msg[1]
 
 					// Log Matching Events
-					if (msg->opcode >= 0) {
-						INFO_LOG(SCENET, "EventLoop[%d]: Matching Event [%d=%s] OptSize=%d", matchingId, msg->opcode, getMatchingEventStr(msg->opcode), msg->optlen);
-					}
+					INFO_LOG(SCENET, "EventLoop[%d]: Matching Event [%d=%s] OptSize=%d", matchingId, msg->opcode, getMatchingEventStr(msg->opcode), msg->optlen);
 
 					context->eventlock->unlock(); // Unlock to prevent race-condition with other threads due to recursive lock
 					// Call Event Handler

@@ -43,7 +43,10 @@ win32 {
 	HEADERS += $$P/Common/MemArena.h
 }
 
+armv7: SOURCES += $$P/Common/ColorConvNEON.cpp
+
 SOURCES += $$P/Common/ChunkFile.cpp \
+	$$P/Common/ColorConv.cpp \
 	$$P/Common/ConsoleListener.cpp \
 	$$P/Common/FileUtil.cpp \
 	$$P/Common/LogManager.cpp \
@@ -64,8 +67,9 @@ HEADERS += $$P/Common/ChunkFile.h \
 	$$P/Common/MsgHandler.h \
 	$$P/Common/StringUtils.h \
 	$$P/Common/ThreadPools.h \
+	$$P/Common/ThreadSafeList.h \
 	$$P/Common/Timer.h \
 	$$P/Common/Crypto/*.h
 
-INCLUDEPATH += $$P/native
+INCLUDEPATH += $$P/ext/native
 

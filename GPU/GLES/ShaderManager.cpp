@@ -27,14 +27,15 @@
 
 #include "base/logging.h"
 #include "math/math_util.h"
-#include "gfx_es2/gl_state.h"
 #include "math/lin/matrix4x4.h"
+#include "profiler/profiler.h"
 
 #include "Core/Config.h"
 #include "Core/Reporting.h"
 #include "GPU/Math3D.h"
 #include "GPU/GPUState.h"
 #include "GPU/ge_constants.h"
+#include "GPU/GLES/GLStateCache.h"
 #include "GPU/GLES/ShaderManager.h"
 #include "GPU/GLES/TransformPipeline.h"
 #include "UI/OnScreenDisplay.h"
@@ -42,6 +43,7 @@
 #include "i18n/i18n.h"
 
 Shader::Shader(const char *code, uint32_t shaderType, bool useHWTransform, const ShaderID &shaderID) : failed_(false), useHWTransform_(useHWTransform), id_(shaderID) {
+	PROFILE_THIS_SCOPE("shadercomp");
 	source_ = code;
 #ifdef SHADERLOG
 	OutputDebugStringUTF8(code);
@@ -49,7 +51,7 @@ Shader::Shader(const char *code, uint32_t shaderType, bool useHWTransform, const
 	shader = glCreateShader(shaderType);
 	glShaderSource(shader, 1, &code, 0);
 	glCompileShader(shader);
-	GLint success;
+	GLint success = 0;
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
 	if (!success) {
 #define MAX_INFO_LOG_SIZE 2048
@@ -82,6 +84,8 @@ Shader::~Shader() {
 
 LinkedShader::LinkedShader(Shader *vs, Shader *fs, u32 vertType, bool useHWTransform, LinkedShader *previous)
 		: useHWTransform_(useHWTransform), program(0), dirtyUniforms(0) {
+	PROFILE_THIS_SCOPE("shaderlink");
+
 	program = glCreateProgram();
 	vs_ = vs;
 	glAttachShader(program, vs->shader);
@@ -99,7 +103,7 @@ LinkedShader::LinkedShader(Shader *vs, Shader *fs, u32 vertType, bool useHWTrans
 	glBindAttribLocation(program, ATTR_COLOR1, "color1");
 
 #ifndef USING_GLES2
-	if (gl_extensions.ARB_blend_func_extended) {
+	if (gstate_c.featureFlags & GPU_SUPPORTS_DUALSOURCE_BLEND) {
 		// Dual source alpha
 		glBindFragDataLocationIndexed(program, 0, 0, "fragColor0");
 		glBindFragDataLocationIndexed(program, 0, 1, "fragColor1");
@@ -163,6 +167,7 @@ LinkedShader::LinkedShader(Shader *vs, Shader *fs, u32 vertType, bool useHWTrans
 		numBones = TranslateNumBones(vertTypeGetNumBoneWeights(vertType));
 	else
 		numBones = 0;
+	u_depthRange = glGetUniformLocation(program, "u_depthRange");
 
 #ifdef USE_BONE_ARRAY
 	u_bone = glGetUniformLocation(program, "u_bone");
@@ -229,6 +234,8 @@ LinkedShader::LinkedShader(Shader *vs, Shader *fs, u32 vertType, bool useHWTrans
 	if (u_texmtx != -1) availableUniforms |= DIRTY_TEXMATRIX;
 	if (u_stencilReplaceValue != -1) availableUniforms |= DIRTY_STENCILREPLACEVALUE;
 	if (u_blendFixA != -1 || u_blendFixB != -1 || u_fbotexSize != -1) availableUniforms |= DIRTY_SHADERBLEND;
+	if (u_depthRange != -1)
+		availableUniforms |= DIRTY_DEPTHRANGE;
 
 	// Looping up to numBones lets us avoid checking u_bone[i]
 #ifdef USE_BONE_ARRAY
@@ -339,6 +346,10 @@ static void SetFloat24Uniform3(int uniform, const u32 data[3]) {
 	glUniform3fv(uniform, 1, (const GLfloat *)&col[0]);
 }
 
+static void SetFloatUniform4(int uniform, float data[4]) {
+	glUniform4fv(uniform, 1, data);
+}
+
 static void SetMatrix4x3(int uniform, const float *m4x3) {
 	float m4x4[16];
 	ConvertMatrix4x3To4x4(m4x4, m4x3);
@@ -402,11 +413,11 @@ void LinkedShader::UpdateUniforms(u32 vertType) {
 		// In Phantasy Star Portable 2, depth range sometimes goes negative and is clamped by glDepthRange to 0,
 		// causing graphics clipping glitch (issue #1788). This hack modifies the projection matrix to work around it.
 		if (g_Config.bDepthRangeHack) {
-			float zScale = getFloat24(gstate.viewportz1) / 65535.0f;
-			float zOff = getFloat24(gstate.viewportz2) / 65535.0f;
+			float zScale = gstate.getViewportZScale() / 65535.0f;
+			float zCenter = gstate.getViewportZCenter() / 65535.0f;
 
 			// if far depth range < 0
-			if (zOff + zScale < 0.0f) {
+			if (zCenter + zScale < 0.0f) {
 				// if perspective projection
 				if (flippedMatrix[11] < 0.0f) {
 					float depthMax = gstate.getDepthRangeMax() / 65535.0f;
@@ -418,7 +429,7 @@ void LinkedShader::UpdateUniforms(u32 vertType) {
 					float n = b / (a - 1.0f);
 					float f = b / (a + 1.0f);
 
-					f = (n * f) / (n + ((zOff + zScale) * (n - f) / (depthMax - depthMin)));
+					f = (n * f) / (n + ((zCenter + zScale) * (n - f) / (depthMax - depthMin)));
 
 					a = (n + f) / (n - f);
 					b = (2.0f * n * f) / (n - f);
@@ -438,7 +449,7 @@ void LinkedShader::UpdateUniforms(u32 vertType) {
 	if (dirty & DIRTY_PROJTHROUGHMATRIX)
 	{
 		Matrix4x4 proj_through;
-		proj_through.setOrtho(0.0f, gstate_c.curRTWidth, gstate_c.curRTHeight, 0, 0, 1);
+		proj_through.setOrtho(0.0f, gstate_c.curRTWidth, gstate_c.curRTHeight, 0, 0.0f, 1.0f);
 		glUniformMatrix4fv(u_proj_through, 1, GL_FALSE, proj_through.getReadPtr());
 	}
 	if (dirty & DIRTY_TEXENV) {
@@ -543,7 +554,7 @@ void LinkedShader::UpdateUniforms(u32 vertType) {
 		glUniform4fv(u_uvscaleoffset, 1, uvscaleoff);
 	}
 
-	if (dirty & DIRTY_TEXCLAMP) {
+	if ((dirty & DIRTY_TEXCLAMP) && u_texclamp != -1) {
 		const float invW = 1.0f / (float)gstate_c.curTextureWidth;
 		const float invH = 1.0f / (float)gstate_c.curTextureHeight;
 		const int w = gstate.getTextureWidth(0);
@@ -577,6 +588,18 @@ void LinkedShader::UpdateUniforms(u32 vertType) {
 	}
 	if (dirty & DIRTY_TEXMATRIX) {
 		SetMatrix4x3(u_texmtx, gstate.tgenMatrix);
+	}
+	if ((dirty & DIRTY_DEPTHRANGE) && u_depthRange != -1) {
+		float viewZScale = gstate.getViewportZScale();
+		float viewZCenter = gstate.getViewportZCenter();
+		float viewZInvScale;
+		if (viewZScale != 0.0) {
+			viewZInvScale = 1.0f / viewZScale;
+		} else {
+			viewZInvScale = 0.0;
+		}
+		float data[4] = { viewZScale, viewZCenter, viewZCenter, viewZInvScale };
+		SetFloatUniform4(u_depthRange, data);
 	}
 
 	if (dirty & DIRTY_STENCILREPLACEVALUE) {
@@ -724,6 +747,7 @@ void ShaderManager::DirtyLastShader() { // disables vertex arrays
 	if (lastShader_)
 		lastShader_->stop();
 	lastShader_ = 0;
+	lastVShaderSame_ = false;
 }
 
 // This is to be used when debugging why incompatible shaders are being linked, like is
@@ -779,9 +803,9 @@ Shader *ShaderManager::ApplyVertexShader(int prim, u32 vertType) {
 		vs = new Shader(codeBuffer_, GL_VERTEX_SHADER, useHWTransform, VSID);
 
 		if (vs->Failed()) {
-			I18NCategory *gs = GetI18NCategory("Graphics");
+			I18NCategory *gr = GetI18NCategory("Graphics");
 			ERROR_LOG(G3D, "Shader compilation failed, falling back to software transform");
-			osm.Show(gs->T("hardware transform error - falling back to software"), 2.5f, 0xFF3030FF, -1, true);
+			osm.Show(gr->T("hardware transform error - falling back to software"), 2.5f, 0xFF3030FF, -1, true);
 			delete vs;
 
 			// TODO: Look for existing shader with the appropriate ID, use that instead of generating a new one - however, need to make sure
@@ -824,9 +848,10 @@ LinkedShader *ShaderManager::ApplyFragmentShader(Shader *vs, int prim, u32 vertT
 	// Okay, we have both shaders. Let's see if there's a linked one.
 	LinkedShader *ls = NULL;
 
+	u32 switchDirty = shaderSwitchDirty_;
 	for (auto iter = linkedShaderCache_.begin(); iter != linkedShaderCache_.end(); ++iter) {
 		// Deferred dirtying! Let's see if we can make this even more clever later.
-		iter->ls->dirtyUniforms |= shaderSwitchDirty_;
+		iter->ls->dirtyUniforms |= switchDirty;
 
 		if (iter->vs == vs && iter->fs == fs) {
 			ls = iter->ls;

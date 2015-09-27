@@ -6,8 +6,10 @@ CONFIG += staticlib
 
 include(Settings.pri)
 
-INCLUDEPATH += $$P/ $$P/native
-!contains(DEFINES, USING_GLES2): INCLUDEPATH += $$P/native/ext/glew
+INCLUDEPATH += $$P/ $$P/ext/native
+!exists( /usr/include/GL/glew.h ) {
+	!contains(DEFINES, USING_GLES2): INCLUDEPATH += $$P/ext/native/ext/glew
+}
 
 win32 {
 	SOURCES += $$P/Windows/OpenGLBase.cpp
@@ -22,17 +24,19 @@ win32 {
 }
 
 SOURCES += $$P/GPU/GeDisasm.cpp \ # GPU
+	$$P/GPU/GPU.cpp \
 	$$P/GPU/GPUCommon.cpp \
 	$$P/GPU/GPUState.cpp \
 	$$P/GPU/Math3D.cpp \
 	$$P/GPU/Null/NullGpu.cpp \
+	$$P/GPU/GLES/FBO.cpp \
 	$$P/GPU/GLES/DepalettizeShader.cpp \
 	$$P/GPU/GLES/FragmentShaderGenerator.cpp \
 	$$P/GPU/GLES/FragmentTestCache.cpp \
 	$$P/GPU/GLES/Framebuffer.cpp \
+	$$P/GPU/GLES/GLStateCache.cpp \
 	$$P/GPU/GLES/GLES_GPU.cpp \
 	$$P/GPU/GLES/ShaderManager.cpp \
-	$$P/GPU/GLES/Spline.cpp \
 	$$P/GPU/GLES/StateMapping.cpp \
 	$$P/GPU/GLES/StencilBuffer.cpp \
 	$$P/GPU/GLES/TextureCache.cpp \
@@ -42,8 +46,10 @@ SOURCES += $$P/GPU/GeDisasm.cpp \ # GPU
 	$$P/GPU/Software/*.cpp \
 	$$P/GPU/Debugger/*.cpp \
 	$$P/GPU/Common/DepalettizeShaderCommon.cpp \
+	$$P/GPU/Common/GPUDebugInterface.cpp \
 	$$P/GPU/Common/IndexGenerator.cpp \
 	$$P/GPU/Common/TextureDecoder.cpp \
+	$$P/GPU/Common/TextureScalerCommon.cpp \
 	$$P/GPU/Common/VertexDecoderCommon.cpp \
 	$$P/GPU/Common/TextureCacheCommon.cpp \
 	$$P/GPU/Common/TransformCommon.cpp \

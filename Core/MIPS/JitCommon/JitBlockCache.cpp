@@ -49,6 +49,8 @@
 #elif defined(_M_IX86) || defined(_M_X64)
 #include "Common/x64Analyzer.h"
 #include "Core/MIPS/x86/Asm.h"
+#elif defined(ARM64)
+#include "Core/MIPS/ARM64/Arm64Asm.h"
 #else
 // FakeJit doesn't need an emitter, no blocks will be created
 #include "Core/MIPS/MIPS.h"
@@ -72,6 +74,9 @@ using namespace ArmGen;
 using namespace ArmJitConstants;
 #elif defined(_M_X64) || defined(_M_IX86)
 using namespace Gen;
+#elif defined(ARM64)
+using namespace Arm64Gen;
+using namespace Arm64JitConstants;
 #endif
 
 const u32 INVALID_EXIT = 0xFFFFFFFF;
@@ -438,6 +443,11 @@ void JitBlockCache::LinkBlockExits(int i) {
 					}
 				}
 				b.linkStatus[e] = true;
+#elif defined(ARM64)
+				ARM64XEmitter emit(b.exitPtrs[e]);
+				emit.B(blocks_[destinationBlock].checkedEntry);
+				emit.FlushIcache();
+				b.linkStatus[e] = true;
 #endif
 			}
 		}
@@ -556,13 +566,20 @@ void JitBlockCache::DestroyBlock(int block_num, bool invalidate) {
 	}
 
 	b->invalid = true;
-	if (Memory::ReadUnchecked_U32(b->originalAddress) == GetEmuHackOpForBlock(block_num).encoding)
-		Memory::Write_Opcode_JIT(b->originalAddress, b->originalFirstOpcode);
+	if (!b->IsPureProxy()) {
+		if (Memory::ReadUnchecked_U32(b->originalAddress) == GetEmuHackOpForBlock(block_num).encoding)
+			Memory::Write_Opcode_JIT(b->originalAddress, b->originalFirstOpcode);
+	}
 
 	// It's not safe to set normalEntry to 0 here, since we use a binary search
 	// that looks at that later to find blocks. Marking it invalid is enough.
 
 	UnlinkBlock(block_num);
+
+	// Don't change the jit code when invalidating a pure proxy block.
+	if (b->IsPureProxy()) {
+		return;
+	}
 
 #if defined(ARM)
 
@@ -584,6 +601,18 @@ void JitBlockCache::DestroyBlock(int block_num, bool invalidate) {
 	XEmitter emit((u8 *)b->checkedEntry);
 	emit.MOV(32, M(&mips_->pc), Imm32(b->originalAddress));
 	emit.JMP(MIPSComp::jit->Asm().dispatcher, true);
+
+#elif defined(ARM64)
+
+	// Send anyone who tries to run this block back to the dispatcher.
+	// Not entirely ideal, but .. works.
+	// Spurious entrances from previously linked blocks can only come through checkedEntry
+	ARM64XEmitter emit((u8 *)b->checkedEntry);
+	emit.MOVI2R(SCRATCH1, b->originalAddress);
+	emit.STR(INDEX_UNSIGNED, SCRATCH1, CTXREG, offsetof(MIPSState, pc));
+	emit.B(MIPSComp::jit->dispatcher);
+	emit.FlushIcache();
+
 #endif
 }
 
@@ -594,6 +623,11 @@ void JitBlockCache::InvalidateICache(u32 address, const u32 length) {
 
 	if (pEnd < pAddr) {
 		ERROR_LOG(JIT, "Bad InvalidateICache: %08x with len=%d", address, length);
+		return;
+	}
+
+	if (pAddr == 0 && pEnd >= 0x1FFFFFFF) {
+		InvalidateChangedBlocks();
 		return;
 	}
 
@@ -618,14 +652,60 @@ void JitBlockCache::InvalidateICache(u32 address, const u32 length) {
 	} while (false);
 }
 
+void JitBlockCache::InvalidateChangedBlocks() {
+	// The primary goal of this is to make sure block linking is cleared up.
+	for (int block_num = 0; block_num < num_blocks_; ++block_num) {
+		JitBlock &b = blocks_[block_num];
+		if (b.invalid || b.IsPureProxy())
+			continue;
+
+		const u32 emuhack = GetEmuHackOpForBlock(block_num).encoding;
+		if (Memory::ReadUnchecked_U32(b.originalAddress) != emuhack) {
+			DEBUG_LOG(JIT, "Invalidating changed block at %08x", b.originalAddress);
+			DestroyBlock(block_num, true);
+		}
+	}
+}
+
 int JitBlockCache::GetBlockExitSize() {
 #if defined(ARM)
 	// Will depend on the sequence found to encode the destination address.
 	return 0;
 #elif defined(_M_IX86) || defined(_M_X64)
 	return 15;
+#elif defined(ARM64)
+	// Will depend on the sequence found to encode the destination address.
+	return 0;
 #else
 #warning GetBlockExitSize unimplemented
 	return 0;
 #endif
+}
+
+void JitBlockCache::ComputeStats(BlockCacheStats &bcStats) {
+	double totalBloat = 0.0;
+	double maxBloat = 0.0;
+	double minBloat = 1000000000.0;
+	for (int i = 0; i < num_blocks_; i++) {
+		JitBlock *b = GetBlock(i);
+		double codeSize = (double)b->codeSize;
+		if (codeSize == 0)
+			continue;
+		double origSize = (double)(4 * b->originalSize);
+		double bloat = codeSize / origSize;
+		if (bloat < minBloat) {
+			minBloat = bloat;
+			bcStats.minBloatBlock = b->originalAddress;
+		}
+		if (bloat > maxBloat) {
+			maxBloat = bloat;
+			bcStats.maxBloatBlock = b->originalAddress;
+		}
+		totalBloat += bloat;
+		bcStats.bloatMap[bloat] = b->originalAddress;
+	}
+	bcStats.numBlocks = num_blocks_;
+	bcStats.minBloat = minBloat;
+	bcStats.maxBloat = maxBloat;
+	bcStats.avgBloat = totalBloat / (double)num_blocks_;
 }

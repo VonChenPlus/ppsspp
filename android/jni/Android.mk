@@ -1,30 +1,10 @@
 LOCAL_PATH := $(call my-dir)
 
-# BEGIN Native Audio Separate Library - copy paste this section to your Android.mk
-
-include $(CLEAR_VARS)
-
-LOCAL_MODULE := native_audio
-LOCAL_CFLAGS := -O3 -fsigned-char -Wall -Wno-multichar -Wno-psabi -D__STDC_CONSTANT_MACROS
-# yes, it's really CPPFLAGS for C++
-LOCAL_CPPFLAGS := -fno-exceptions -std=gnu++11 -fno-rtti
-NATIVE := ../../native
-LOCAL_SRC_FILES := \
-		$(NATIVE)/android/native-audio-so.cpp
-LOCAL_C_INCLUDES := \
-		$(LOCAL_PATH)/$(NATIVE) \
-		$(LOCAL_PATH)
-LOCAL_LDLIBS := -lOpenSLES -llog
-		
-include $(BUILD_SHARED_LIBRARY)
-
-# END Native Audio Separate Library - copy paste this section to your Android.mk
-
 include $(CLEAR_VARS)
 
 #TARGET_PLATFORM := android-8
 
-NATIVE := ../../native
+NATIVE := ../../ext/native
 SRC := ../..
 
 include $(LOCAL_PATH)/Locals.mk
@@ -51,7 +31,6 @@ ARCH_FILES := \
   $(SRC)/GPU/Common/VertexDecoderX86.cpp
 endif
 
-# ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
 ifeq ($(findstring armeabi-v7a,$(TARGET_ARCH_ABI)),armeabi-v7a)
 ARCH_FILES := \
   $(SRC)/GPU/Common/TextureDecoderNEON.cpp.neon \
@@ -59,6 +38,7 @@ ARCH_FILES := \
   $(SRC)/Common/ArmEmitter.cpp \
   $(SRC)/Common/ArmCPUDetect.cpp \
   $(SRC)/Common/ArmThunk.cpp \
+  $(SRC)/Common/ColorConvNEON.cpp.neon \
   $(SRC)/Core/MIPS/ARM/ArmCompALU.cpp \
   $(SRC)/Core/MIPS/ARM/ArmCompBranch.cpp \
   $(SRC)/Core/MIPS/ARM/ArmCompFPU.cpp \
@@ -72,7 +52,30 @@ ARCH_FILES := \
   $(SRC)/Core/MIPS/ARM/ArmRegCache.cpp \
   $(SRC)/Core/MIPS/ARM/ArmRegCacheFPU.cpp \
   $(SRC)/GPU/Common/VertexDecoderArm.cpp \
+  $(SRC)/ext/disarm.cpp \
   ArmEmitterTest.cpp
+endif
+
+ifeq ($(findstring arm64-v8a,$(TARGET_ARCH_ABI)),arm64-v8a)
+ARCH_FILES := \
+  $(SRC)/GPU/Common/TextureDecoderNEON.cpp \
+  $(SRC)/Core/Util/AudioFormatNEON.cpp \
+  $(SRC)/Common/Arm64Emitter.cpp \
+  $(SRC)/Common/ArmCPUDetect.cpp \
+  $(SRC)/Common/ColorConvNEON.cpp \
+  $(SRC)/Core/MIPS/ARM64/Arm64CompALU.cpp \
+  $(SRC)/Core/MIPS/ARM64/Arm64CompBranch.cpp \
+  $(SRC)/Core/MIPS/ARM64/Arm64CompFPU.cpp \
+  $(SRC)/Core/MIPS/ARM64/Arm64CompLoadStore.cpp \
+  $(SRC)/Core/MIPS/ARM64/Arm64CompVFPU.cpp \
+  $(SRC)/Core/MIPS/ARM64/Arm64CompReplace.cpp \
+  $(SRC)/Core/MIPS/ARM64/Arm64Asm.cpp \
+  $(SRC)/Core/MIPS/ARM64/Arm64Jit.cpp \
+  $(SRC)/Core/MIPS/ARM64/Arm64RegCache.cpp \
+  $(SRC)/Core/MIPS/ARM64/Arm64RegCacheFPU.cpp \
+  $(SRC)/Core/Util/DisArm64.cpp \
+  $(SRC)/GPU/Common/VertexDecoderArm64.cpp \
+  Arm64EmitterTest.cpp
 endif
 
 ifeq ($(TARGET_ARCH_ABI),armeabi)
@@ -112,7 +115,6 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/MIPS/MIPSDebugInterface.cpp \
   $(SRC)/UI/ui_atlas.cpp \
   $(SRC)/UI/OnScreenDisplay.cpp \
-  $(SRC)/ext/disarm.cpp \
   $(SRC)/ext/libkirk/AES.c \
   $(SRC)/ext/libkirk/amctrl.c \
   $(SRC)/ext/libkirk/SHA1.c \
@@ -134,6 +136,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Common/Crypto/sha1.cpp \
   $(SRC)/Common/Crypto/sha256.cpp \
   $(SRC)/Common/ChunkFile.cpp \
+  $(SRC)/Common/ColorConv.cpp \
   $(SRC)/Common/KeyMap.cpp \
   $(SRC)/Common/LogManager.cpp \
   $(SRC)/Common/MemArena.cpp \
@@ -145,15 +148,18 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Common/Timer.cpp \
   $(SRC)/Common/Misc.cpp \
   $(SRC)/GPU/Math3D.cpp \
+  $(SRC)/GPU/GPU.cpp \
   $(SRC)/GPU/GPUCommon.cpp \
   $(SRC)/GPU/GPUState.cpp \
   $(SRC)/GPU/GeDisasm.cpp \
   $(SRC)/GPU/Common/DepalettizeShaderCommon.cpp \
   $(SRC)/GPU/Common/FramebufferCommon.cpp \
+  $(SRC)/GPU/Common/GPUDebugInterface.cpp \
   $(SRC)/GPU/Common/IndexGenerator.cpp.arm \
   $(SRC)/GPU/Common/SoftwareTransformCommon.cpp.arm \
   $(SRC)/GPU/Common/VertexDecoderCommon.cpp.arm \
   $(SRC)/GPU/Common/TextureCacheCommon.cpp.arm \
+  $(SRC)/GPU/Common/TextureScalerCommon.cpp.arm \
   $(SRC)/GPU/Common/SplineCommon.cpp.arm \
   $(SRC)/GPU/Common/DrawEngineCommon.cpp.arm \
   $(SRC)/GPU/Common/TransformCommon.cpp.arm \
@@ -164,6 +170,8 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/GPU/GLES/Framebuffer.cpp \
   $(SRC)/GPU/GLES/DepalettizeShader.cpp \
   $(SRC)/GPU/GLES/GLES_GPU.cpp.arm \
+  $(SRC)/GPU/GLES/GLStateCache.cpp.arm \
+  $(SRC)/GPU/GLES/FBO.cpp \
   $(SRC)/GPU/GLES/StencilBuffer.cpp.arm \
   $(SRC)/GPU/GLES/TextureCache.cpp.arm \
   $(SRC)/GPU/GLES/TransformPipeline.cpp.arm \
@@ -173,7 +181,6 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/GPU/GLES/FragmentShaderGenerator.cpp.arm \
   $(SRC)/GPU/GLES/FragmentTestCache.cpp.arm \
   $(SRC)/GPU/GLES/TextureScaler.cpp \
-  $(SRC)/GPU/GLES/Spline.cpp \
   $(SRC)/GPU/Null/NullGpu.cpp \
   $(SRC)/GPU/Software/Clipper.cpp \
   $(SRC)/GPU/Software/Lighting.cpp \
@@ -199,6 +206,11 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/Host.cpp \
   $(SRC)/Core/Loaders.cpp \
   $(SRC)/Core/PSPLoaders.cpp \
+  $(SRC)/Core/FileLoaders/CachingFileLoader.cpp \
+  $(SRC)/Core/FileLoaders/DiskCachingFileLoader.cpp \
+  $(SRC)/Core/FileLoaders/HTTPFileLoader.cpp \
+  $(SRC)/Core/FileLoaders/LocalFileLoader.cpp \
+  $(SRC)/Core/FileLoaders/RetryingFileLoader.cpp \
   $(SRC)/Core/MemMap.cpp \
   $(SRC)/Core/MemMapFunctions.cpp \
   $(SRC)/Core/Reporting.cpp \
@@ -293,6 +305,7 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/FileSystems/tlzrc.cpp \
   $(SRC)/Core/MIPS/JitCommon/JitCommon.cpp \
   $(SRC)/Core/MIPS/JitCommon/JitBlockCache.cpp \
+  $(SRC)/Core/MIPS/JitCommon/JitState.cpp \
   $(SRC)/Core/Util/AudioFormat.cpp \
   $(SRC)/Core/Util/GameManager.cpp \
   $(SRC)/Core/Util/BlockAllocator.cpp \
@@ -300,11 +313,21 @@ EXEC_AND_LIB_FILES := \
   $(SRC)/Core/Util/PPGeDraw.cpp \
   $(SRC)/git-version.cpp
 
+LOCAL_MODULE := ppsspp_core
+LOCAL_SRC_FILES := $(EXEC_AND_LIB_FILES)
+
+include $(BUILD_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+include $(LOCAL_PATH)/Locals.mk
+LOCAL_STATIC_LIBRARIES += ppsspp_core
+
 # These are the files just for ppsspp_jni
 LOCAL_MODULE := ppsspp_jni
 LOCAL_SRC_FILES := \
-  $(EXEC_AND_LIB_FILES) \
-  $(SRC)/native/android/app-android.cpp \
+  $(SRC)/android/jni/app-android.cpp \
+  $(SRC)/android/jni/native_audio.cpp \
+  $(SRC)/android/jni/native-audio-so.cpp \
   $(SRC)/UI/BackgroundAudio.cpp \
   $(SRC)/UI/DevScreens.cpp \
   $(SRC)/UI/EmuScreen.cpp \
@@ -312,6 +335,7 @@ LOCAL_SRC_FILES := \
   $(SRC)/UI/MiscScreens.cpp \
   $(SRC)/UI/ReportScreen.cpp \
   $(SRC)/UI/PauseScreen.cpp \
+  $(SRC)/UI/SavedataScreen.cpp \
   $(SRC)/UI/Store.cpp \
   $(SRC)/UI/GamepadEmu.cpp \
   $(SRC)/UI/GameInfoCache.cpp \
@@ -326,12 +350,15 @@ LOCAL_SRC_FILES := \
   $(SRC)/UI/InstallZipScreen.cpp \
   $(SRC)/UI/NativeApp.cpp
 
-include $(BUILD_SHARED_LIBRARY)
+ifneq ($(SKIPAPP),1)
+  include $(BUILD_SHARED_LIBRARY)
+endif
 
 
 ifeq ($(HEADLESS),1)
   include $(CLEAR_VARS)
   include $(LOCAL_PATH)/Locals.mk
+  LOCAL_STATIC_LIBRARIES += ppsspp_core
 
   # Android 5.0 requires PIE for executables.  Only supported on 4.1+, but this is testing anyway.
   LOCAL_CFLAGS += -fPIE
@@ -339,7 +366,6 @@ ifeq ($(HEADLESS),1)
 
   LOCAL_MODULE := ppsspp_headless
   LOCAL_SRC_FILES := \
-    $(EXEC_AND_LIB_FILES) \
     $(SRC)/headless/Headless.cpp \
     $(SRC)/headless/Compare.cpp
 
@@ -349,6 +375,7 @@ endif
 ifeq ($(UNITTEST),1)
   include $(CLEAR_VARS)
   include $(LOCAL_PATH)/Locals.mk
+  LOCAL_STATIC_LIBRARIES += ppsspp_core
 
   # Android 5.0 requires PIE for executables.  Only supported on 4.1+, but this is testing anyway.
   LOCAL_CFLAGS += -fPIE
@@ -403,14 +430,20 @@ ifeq ($(UNITTEST),1)
 	$(SRC)/ext/armips/Util/StringFormat.cpp \
 	$(SRC)/ext/armips/Util/Util.cpp
 
+  ifeq ($(findstring arm64-v8a,$(TARGET_ARCH_ABI)),arm64-v8a)
+    TESTARMEMITTER_FILE = $(SRC)/unittest/TestArm64Emitter.cpp
+  else
+    TESTARMEMITTER_FILE = $(SRC)/unittest/TestArmEmitter.cpp
+  endif
+
   LOCAL_MODULE := ppsspp_unittest
   LOCAL_SRC_FILES := \
-	$(LIBARMIPS_FILES) \
-    $(EXEC_AND_LIB_FILES) \
-	$(SRC)/Core/MIPS/MIPSAsm.cpp \
-    $(SRC)/UnitTest/JitHarness.cpp \
-    $(SRC)/UnitTest/TestArmEmitter.cpp \
-    $(SRC)/UnitTest/UnitTest.cpp
+    $(LIBARMIPS_FILES) \
+    $(SRC)/Core/MIPS/MIPSAsm.cpp \
+    $(SRC)/unittest/JitHarness.cpp \
+    $(SRC)/unittest/TestVertexJit.cpp \
+    $(TESTARMEMITTER_FILE) \
+    $(SRC)/unittest/UnitTest.cpp
 
   include $(BUILD_EXECUTABLE)
 endif

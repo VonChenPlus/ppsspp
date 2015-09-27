@@ -20,6 +20,7 @@
 #include "Common/Log.h"
 #include "Core/Reporting.h"
 #include "GPU/GPUState.h"
+#include "GPU/GLES/GLStateCache.h"
 #include "GPU/Common/DepalettizeShaderCommon.h"
 
 
@@ -28,12 +29,12 @@
 // Uses integer instructions available since OpenGL 3.0. Suitable for ES 3.0 as well.
 void GenerateDepalShader300(char *buffer, GEBufferFormat pixelFormat) {
 	char *p = buffer;
-#ifdef USING_GLES2
-	WRITE(p, "#version 300 es\n");
-	WRITE(p, "precision mediump float;\n");
-#else
-	WRITE(p, "#version 330\n");
-#endif
+	if (gl_extensions.IsGLES) {
+		WRITE(p, "#version 300 es\n");
+		WRITE(p, "precision mediump float;\n");
+	} else {
+		WRITE(p, "#version 330\n");
+	}
 	WRITE(p, "in vec2 v_texcoord0;\n");
 	WRITE(p, "out vec4 fragColor0;\n");
 	WRITE(p, "uniform sampler2D tex;\n");
@@ -88,7 +89,7 @@ void GenerateDepalShader300(char *buffer, GEBufferFormat pixelFormat) {
 		texturePixels = 512;
 
 	if (shift) {
-		WRITE(p, "  index = ((index >> %i) & 0x%02x)", shift, mask);
+		WRITE(p, "  index = (int(uint(index) >> %i) & 0x%02x)", shift, mask);
 	} else {
 		WRITE(p, "  index = (index & 0x%02x)", mask);
 	}
@@ -213,16 +214,17 @@ void GenerateDepalShaderFloat(char *buffer, GEBufferFormat pixelFormat, ShaderLa
 	}
 
 	// Offset by half a texel (plus clutBase) to turn NEAREST filtering into FLOOR.
+	// Technically, the clutBase should be |'d, not added, but that's hard with floats.
 	float texel_offset = ((float)clutBase + 0.5f) / texturePixels;
 	sprintf(offset, " + %f", texel_offset);
 
 	if (lang == GLSL_140) {
-#ifdef USING_GLES2
-		WRITE(p, "#version 100\n");
-		WRITE(p, "precision mediump float;\n");
-#else
-		WRITE(p, "#version 110\n");
-#endif
+		if (gl_extensions.IsGLES) {
+			WRITE(p, "#version 100\n");
+			WRITE(p, "precision mediump float;\n");
+		} else {
+			WRITE(p, "#version 110\n");
+		}
 		WRITE(p, "varying vec2 v_texcoord0;\n");
 		WRITE(p, "uniform sampler2D tex;\n");
 		WRITE(p, "uniform sampler2D pal;\n");

@@ -36,7 +36,7 @@
 
 #if defined(_WIN32)
 #include "Windows/DSoundStream.h"
-#include "Windows/WndMainWindow.h"
+#include "Windows/MainWindow.h"
 #include "Windows/D3D9Base.h"
 #endif
 
@@ -48,15 +48,15 @@
 #include "file/zip_read.h"
 #include "thread/thread.h"
 #include "net/http_client.h"
-#include "gfx_es2/gl_state.h"  // should've been only for screenshot - but actually not, cleanup?
 #include "gfx_es2/draw_text.h"
+#include "gfx_es2/gpu_features.h"
 #include "gfx/gl_lost_manager.h"
-#include "gfx/texture.h"
 #include "i18n/i18n.h"
 #include "input/input_state.h"
 #include "math/fast/fast_math.h"
 #include "math/math_util.h"
 #include "math/lin/matrix4x4.h"
+#include "profiler/profiler.h"
 #include "thin3d/thin3d.h"
 #include "ui/ui.h"
 #include "ui/screen.h"
@@ -70,6 +70,7 @@
 #include "Common/MemArena.h"
 #include "Core/Config.h"
 #include "Core/Core.h"
+#include "Core/FileLoaders/DiskCachingFileLoader.h"
 #include "Core/Host.h"
 #include "Core/SaveState.h"
 #include "Core/Screenshot.h"
@@ -83,9 +84,6 @@
 #include "EmuScreen.h"
 #include "GameInfoCache.h"
 #include "HostTypes.h"
-#ifdef _WIN32
-#include "GPU/Directx9/helper/dx_state.h"
-#endif
 #include "UI/OnScreenDisplay.h"
 #include "UI/MiscScreens.h"
 #include "UI/TiltEventProcessor.h"
@@ -105,6 +103,8 @@ static UI::Theme ui_theme;
 
 #ifdef ARM
 #include "../../android/jni/ArmEmitterTest.h"
+#elif defined(ARM64)
+#include "../../android/jni/Arm64EmitterTest.h"
 #endif
 
 #ifdef IOS
@@ -256,6 +256,8 @@ void NativeGetAppInfo(std::string *app_dir_name, std::string *app_nice_name, boo
 
 #if defined(ARM) && defined(ANDROID)
 	ArmEmitterTest();
+#elif defined(ARM64) && defined(ANDROID)
+	Arm64EmitterTest();
 #endif
 }
 
@@ -269,13 +271,6 @@ void NativeInit(int argc, const char *argv[],
 
 	InitFastMath(cpu_info.bNEON);
 	SetupAudioFormats();
-
-	// Sets both FZ and DefaultNaN on ARM, flipping some ARM implementations into "RunFast" mode for VFP.
-	// http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ddi0274h/Babffifj.html
-	// Do we need to do this on all threads?
-	// Also, the FZ thing may actually be a little bit dangerous, I'm not sure how compliant the MIPS
-	// CPU is with denormal handling. Needs testing. Default-NAN should be reasonably safe though.
-	FPU_SetFastMode();
 
 	bool skipLogo = false;
 	setlocale( LC_ALL, "C" );
@@ -291,7 +286,7 @@ void NativeInit(int argc, const char *argv[],
 #elif defined(BLACKBERRY) || defined(IOS)
 	// Packed assets are included in app
 	VFSRegister("", new DirectoryAssetReader(external_directory));
-#elif defined(__APPLE__) || (defined(__linux__) && !defined(ANDROID))
+#elif !defined(MOBILE_DEVICE) && !defined(_WIN32)
 	VFSRegister("", new DirectoryAssetReader((File::GetExeDirectory() + "assets/").c_str()));
 	VFSRegister("", new DirectoryAssetReader((File::GetExeDirectory()).c_str()));
 	VFSRegister("", new DirectoryAssetReader("/usr/share/ppsspp/assets/"));
@@ -344,9 +339,9 @@ void NativeInit(int argc, const char *argv[],
 	// On Android, create a PSP directory tree in the external_directory,
 	// to hopefully reduce confusion a bit.
 	ILOG("Creating %s", (g_Config.memStickDirectory + "PSP").c_str());
-	mkDir((g_Config.memStickDirectory + "PSP").c_str());
-	mkDir((g_Config.memStickDirectory + "PSP/SAVEDATA").c_str());
-	mkDir((g_Config.memStickDirectory + "PSP/GAME").c_str());
+	File::CreateDir((g_Config.memStickDirectory + "PSP").c_str());
+	File::CreateDir((g_Config.memStickDirectory + "PSP/SAVEDATA").c_str());
+	File::CreateDir((g_Config.memStickDirectory + "PSP/GAME").c_str());
 #endif
 
 	const char *fileToLog = 0;
@@ -442,7 +437,7 @@ void NativeInit(int argc, const char *argv[],
 	else
 		i18nrepo.LoadIni(g_Config.sLanguageIni, langOverridePath);
 
-	I18NCategory *d = GetI18NCategory("DesktopUI");
+	I18NCategory *des = GetI18NCategory("DesktopUI");
 	// Note to translators: do not translate this/add this to PPSSPP-lang's files.
 	// It's intended to be custom for every user.
 	// Only add it to your own personal copies of PPSSPP.
@@ -450,7 +445,7 @@ void NativeInit(int argc, const char *argv[],
 	// TODO: Could allow a setting to specify a font file to load?
 	// TODO: Make this a constant if we can sanely load the font on other systems?
 	AddFontResourceEx(L"assets/Roboto-Condensed.ttf", FR_PRIVATE, NULL);
-	g_Config.sFont = d->T("Font", "Roboto");
+	g_Config.sFont = des->T("Font", "Roboto");
 #endif
 
 	if (!boot_filename.empty() && stateToLoad != NULL)
@@ -482,8 +477,6 @@ void NativeInit(int argc, const char *argv[],
 }
 
 void NativeInitGraphics() {
-	FPU_SetFastMode();
-
 #ifndef _WIN32
 	// Force backend to GL
 	g_Config.iGPUBackend = GPU_BACKEND_OPENGL;
@@ -573,11 +566,6 @@ void NativeInitGraphics() {
 
 	screenManager->setUIContext(uiContext);
 	screenManager->setThin3DContext(thin3d);
-
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
 #ifdef _WIN32
 	winAudioBackend = CreateAudioBackend((AudioBackendType)g_Config.iAudioBackend);
@@ -687,19 +675,6 @@ void NativeRender() {
 	viewport.MaxDepth = 1.0;
 	viewport.MinDepth = 0.0;
 	thin3d->SetViewports(1, &viewport);
-
-	if (g_Config.iGPUBackend == GPU_BACKEND_OPENGL) {
-		glstate.depthWrite.set(GL_TRUE);
-		glstate.colorMask.set(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		glstate.Restore();
-	} else {
-#ifdef _WIN32
-		DX9::dxstate.depthWrite.set(true);
-		DX9::dxstate.colorMask.set(true, true, true, true);
-		DX9::dxstate.Restore();
-#endif
-	}
-
 	thin3d->SetTargetSize(pixel_xres, pixel_yres);
 
 	float xres = dp_xres;
@@ -730,17 +705,6 @@ void NativeRender() {
 		TakeScreenshot();
 	}
 
-	thin3d->SetScissorEnabled(false);
-	if (g_Config.iGPUBackend == GPU_BACKEND_OPENGL) {
-		glstate.depthWrite.set(GL_TRUE);
-		glstate.colorMask.set(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	} else {
-#ifdef _WIN32
-		DX9::dxstate.depthWrite.set(true);
-		DX9::dxstate.colorMask.set(true, true, true, true);
-#endif
-	}
-
 	if (resized) {
 		resized = false;
 		if (g_Config.iGPUBackend == GPU_BACKEND_DIRECT3D9) {
@@ -755,9 +719,15 @@ void HandleGlobalMessage(const std::string &msg, const std::string &value) {
 	if (msg == "inputDeviceConnected") {
 		KeyMap::NotifyPadConnected(value);
 	}
+
+	if (msg == "cacheDir") {
+		DiskCachingFileLoaderCache::SetCacheDir(value);
+	}
 }
 
 void NativeUpdate(InputState &input) {
+	PROFILE_END_FRAME();
+
 	{
 		lock_guard lock(pendingMutex);
 		for (size_t i = 0; i < pendingMessages.size(); i++) {
@@ -777,7 +747,6 @@ void NativeDeviceLost() {
 
 	if (g_Config.iGPUBackend == GPU_BACKEND_OPENGL) {
 		gl_lost();
-		glstate.Restore();
 	}
 	// Should dirty EVERYTHING
 }
@@ -884,7 +853,8 @@ bool NativeAxis(const AxisInput &axis) {
 			return false;
 
 		default:
-			return false;
+			// Don't take over completely!
+			return screenManager->axis(axis);
 	}
 
 	//figure out the sensitivity of the tilt. (sensitivity is originally 0 - 100)

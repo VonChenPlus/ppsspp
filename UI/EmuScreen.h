@@ -46,7 +46,7 @@ public:
 	virtual bool axis(const AxisInput &axis) override;
 
 protected:
-	virtual void CreateViews();
+	virtual void CreateViews() override;
 	UI::EventReturn OnDevTools(UI::EventParams &params);
 
 private:
@@ -59,6 +59,8 @@ private:
 	void onVKeyUp(int virtualKeyCode);
 	void setVKeyAnalogX(int stick, int virtualKeyMin, int virtualKeyMax);
 	void setVKeyAnalogY(int stick, int virtualKeyMin, int virtualKeyMax);
+
+	void releaseButtons();
 
 	void autoLoad();
 	void checkPowerDown();

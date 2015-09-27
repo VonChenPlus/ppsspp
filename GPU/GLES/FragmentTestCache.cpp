@@ -16,7 +16,7 @@
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
 #include "Core/Config.h"
-#include "GPU/GLES/FragmentShaderGenerator.h"
+#include "GPU/Common/GPUStateUtils.h"
 #include "GPU/GLES/FragmentTestCache.h"
 #include "GPU/GPUState.h"
 
@@ -24,7 +24,7 @@
 static const int FRAGTEST_TEXTURE_OLD_AGE = 307;
 static const int FRAGTEST_DECIMATION_INTERVAL = 113;
 
-FragmentTestCache::FragmentTestCache() : textureCache_(NULL), lastTexture_(0) {
+FragmentTestCache::FragmentTestCache() : textureCache_(NULL), lastTexture_(0), decimationCounter_(0) {
 	scratchpad_ = new u8[256 * 4];
 }
 

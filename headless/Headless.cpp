@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "file/zip_read.h"
+#include "profiler/profiler.h"
 #include "Common/FileUtil.h"
 #include "Core/Config.h"
 #include "Core/Core.h"
@@ -69,6 +70,7 @@ struct InputState;
 // Temporary hacks around annoying linking errors.
 void D3D9_SwapBuffers() { }
 void GL_SwapBuffers() { }
+void GL_SwapInterval(int) { }
 void NativeUpdate(InputState &input_state) { }
 void NativeRender() { }
 void NativeResized() { }
@@ -201,6 +203,8 @@ bool RunAutoTest(HeadlessHost *headlessHost, CoreParameter &coreParameter, bool 
 
 int main(int argc, const char* argv[])
 {
+	PROFILE_INIT();
+
 #ifdef ANDROID_NDK_PROFILER
 	setenv("CPUPROFILE_FREQUENCY", "500", 1);
 	setenv("CPUPROFILE", "/sdcard/gmon.out", 1);

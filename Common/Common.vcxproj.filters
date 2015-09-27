@@ -45,6 +45,9 @@
     <ClInclude Include="MathUtil.h" />
     <ClInclude Include="BitSet.h" />
     <ClInclude Include="CodeBlock.h" />
+    <ClInclude Include="ColorConv.h" />
+    <ClInclude Include="ColorConvNEON.h" />
+    <ClInclude Include="ThreadSafeList.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp" />
@@ -79,6 +82,8 @@
     <ClCompile Include="ArmThunk.cpp" />
     <ClCompile Include="MipsEmitter.cpp" />
     <ClCompile Include="Arm64Emitter.cpp" />
+    <ClCompile Include="ColorConv.cpp" />
+    <ClCompile Include="ColorConvNEON.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="CMakeLists.txt" />

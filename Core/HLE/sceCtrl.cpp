@@ -21,7 +21,7 @@
 #include "Core/HLE/FunctionWrappers.h"
 #include "Core/MIPS/MIPS.h"
 #include "Core/CoreTiming.h"
-#include "Core/MemMap.h"
+#include "Core/MemMapHelpers.h"
 #include "Common/ChunkFile.h"
 #include "Common/StdMutex.h"
 #include "Core/HLE/sceCtrl.h"
@@ -181,16 +181,16 @@ void __CtrlButtonUp(u32 buttonBit)
 
 void __CtrlSetAnalogX(float x, int stick)
 {
+	u8 scaled = clamp_u8((int)ceilf(x * 127.5f + 127.5f));
 	std::lock_guard<std::recursive_mutex> guard(ctrlMutex);
-	int scaled = (int)ceilf(x * 127.5f + 127.5f);
-	ctrlCurrent.analog[stick][CTRL_ANALOG_X] = clamp_u8(scaled);
+	ctrlCurrent.analog[stick][CTRL_ANALOG_X] = scaled;
 }
 
 void __CtrlSetAnalogY(float y, int stick)
 {
+	u8 scaled = clamp_u8((int)ceilf(-y * 127.5f + 127.5f));
 	std::lock_guard<std::recursive_mutex> guard(ctrlMutex);
-	int scaled = (int)ceilf(-y * 127.5f + 127.5f);
-	ctrlCurrent.analog[stick][CTRL_ANALOG_Y] = clamp_u8(scaled);
+	ctrlCurrent.analog[stick][CTRL_ANALOG_Y] = scaled;
 }
 
 void __CtrlSetRapidFire(bool state)

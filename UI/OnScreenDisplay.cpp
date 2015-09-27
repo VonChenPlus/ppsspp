@@ -16,7 +16,7 @@ void OnScreenMessagesView::Draw(UIContext &dc) {
 
 	// Get height
 	float w, h;
-	dc.Draw()->MeasureText(UBUNTU24, "Wg", &w, &h);
+	dc.MeasureText(dc.theme->uiFont, "Wg", &w, &h);
 
 	float y = 10.0f;
 	// Then draw them all. 
@@ -27,14 +27,15 @@ void OnScreenMessagesView::Draw(UIContext &dc) {
 		if (alpha < 0.0) alpha = 0.0f;
 		// Messages that are wider than the screen are left-aligned instead of centered.
 		float tw, th;
-		dc.Draw()->MeasureText(UBUNTU24, iter->text.c_str(), &tw, &th);
+		dc.MeasureText(dc.theme->uiFont, iter->text.c_str(), &tw, &th);
 		float x = bounds_.centerX();
 		int align = ALIGN_TOP | ALIGN_HCENTER;
 		if (tw > bounds_.w) {
 			align = ALIGN_TOP | ALIGN_LEFT;
 			x = 2;
 		}
-		dc.Draw()->DrawTextShadow(UBUNTU24, iter->text.c_str(), x, y, colorAlpha(iter->color, alpha), align);
+		dc.SetFontStyle(dc.theme->uiFont);
+		dc.DrawTextShadow(iter->text.c_str(), x, y, colorAlpha(iter->color, alpha), align);
 		y += h;
 	}
 
@@ -52,14 +53,16 @@ restart:
 	}
 }
 
-void OnScreenMessages::Show(const std::string &message, float duration_s, uint32_t color, int icon, bool checkUnique) {
+void OnScreenMessages::Show(const std::string &text, float duration_s, uint32_t color, int icon, bool checkUnique, const char *id) {
 	double now = time_now_d();
 	std::lock_guard<std::recursive_mutex> guard(mutex_);
 	if (checkUnique) {
 		for (auto iter = messages_.begin(); iter != messages_.end(); ++iter) {
-			if (iter->text == message) {
+			if (iter->text == text || (id && !strcmp(iter->id, id))) {
 				Message msg = *iter;
 				msg.endTime = now + duration_s;
+				msg.text = text;
+				msg.color = color;
 				messages_.erase(iter);
 				messages_.insert(messages_.begin(), msg);
 				return;
@@ -67,10 +70,11 @@ void OnScreenMessages::Show(const std::string &message, float duration_s, uint32
 		}
 	}
 	Message msg;
-	msg.text = message;
+	msg.text = text;
 	msg.color = color;
 	msg.endTime = now + duration_s;
 	msg.icon = icon;
+	msg.id = id;
 	messages_.insert(messages_.begin(), msg);
 }
 

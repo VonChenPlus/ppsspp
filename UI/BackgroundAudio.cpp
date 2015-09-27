@@ -2,7 +2,7 @@
 #include "base/logging.h"
 #include "base/timeutil.h"
 #include "base/mutex.h"
-#include "native/file/chunk_file.h"
+#include "file/chunk_file.h"
 
 #include "Common/CommonTypes.h"
 #include "Core/HW/SimpleAudioDec.h"
@@ -16,8 +16,7 @@
 class AT3PlusReader {
 public:
 	AT3PlusReader(const std::string &data)
-	: data_(data),
-		file_((const uint8_t *)&data[0],
+	: file_((const uint8_t *)&data[0],
 		(int32_t)data.size()),
 		raw_data_(0),
 		raw_data_size_(0),
@@ -150,7 +149,6 @@ public:
 	}
 
 private:
-	const std::string &data_;
 	ChunkFile file_;
 	uint8_t *raw_data_;
 	int raw_data_size_;
@@ -184,11 +182,6 @@ void SetBackgroundAudioGame(const std::string &path) {
 	lock_guard lock(bgMutex);
 	if (path == bgGamePath) {
 		// Do nothing
-		return;
-	}
-
-	if (!g_Config.bEnableSound) {
-		ClearBackgroundAudio();
 		return;
 	}
 

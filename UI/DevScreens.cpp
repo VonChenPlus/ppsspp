@@ -18,12 +18,13 @@
 #include <algorithm>
 
 #include "base/compat.h"
-#include "gfx_es2/gl_state.h"
+#include "gfx_es2/gpu_features.h"
 #include "i18n/i18n.h"
 #include "ui/ui_context.h"
 #include "ui/view.h"
 #include "ui/viewgroup.h"
 #include "ui/ui.h"
+#include "profiler/profiler.h"
 
 #include "Common/LogManager.h"
 #include "Common/CPUDetect.h"
@@ -57,18 +58,21 @@ static const char *logLevelList[] = {
 
 void DevMenu::CreatePopupContents(UI::ViewGroup *parent) {
 	using namespace UI;
-	I18NCategory *de = GetI18NCategory("Developer");
+	I18NCategory *dev = GetI18NCategory("Developer");
 	I18NCategory *sy = GetI18NCategory("System");
 
 #if !defined(MOBILE_DEVICE)
-	parent->Add(new Choice(de->T("Log View")))->OnClick.Handle(this, &DevMenu::OnLogView);
+	parent->Add(new Choice(dev->T("Log View")))->OnClick.Handle(this, &DevMenu::OnLogView);
 #endif
-	parent->Add(new Choice(de->T("Logging Channels")))->OnClick.Handle(this, &DevMenu::OnLogConfig);
+	parent->Add(new Choice(dev->T("Logging Channels")))->OnClick.Handle(this, &DevMenu::OnLogConfig);
 	parent->Add(new Choice(sy->T("Developer Tools")))->OnClick.Handle(this, &DevMenu::OnDeveloperTools);
-	parent->Add(new Choice(de->T("Jit Compare")))->OnClick.Handle(this, &DevMenu::OnJitCompare);
-	parent->Add(new Choice(de->T("Toggle Freeze")))->OnClick.Handle(this, &DevMenu::OnFreezeFrame);
-	parent->Add(new Choice(de->T("Dump Frame GPU Commands")))->OnClick.Handle(this, &DevMenu::OnDumpFrame);
-	parent->Add(new Choice(de->T("Toggle Audio Debug")))->OnClick.Handle(this, &DevMenu::OnToggleAudioDebug);
+	parent->Add(new Choice(dev->T("Jit Compare")))->OnClick.Handle(this, &DevMenu::OnJitCompare);
+	parent->Add(new Choice(dev->T("Toggle Freeze")))->OnClick.Handle(this, &DevMenu::OnFreezeFrame);
+	parent->Add(new Choice(dev->T("Dump Frame GPU Commands")))->OnClick.Handle(this, &DevMenu::OnDumpFrame);
+	parent->Add(new Choice(dev->T("Toggle Audio Debug")))->OnClick.Handle(this, &DevMenu::OnToggleAudioDebug);
+#ifdef USE_PROFILER
+	parent->Add(new CheckBox(&g_Config.bShowFrameProfiler, dev->T("Frame Profiler"), ""));
+#endif
 
 	RingbufferLogListener *ring = LogManager::GetInstance()->GetRingbufferListener();
 	if (ring) {
@@ -194,7 +198,7 @@ void LogConfigScreen::CreateViews() {
 	using namespace UI;
 
 	I18NCategory *di = GetI18NCategory("Dialog");
-	I18NCategory *de = GetI18NCategory("Developer");
+	I18NCategory *dev = GetI18NCategory("Developer");
 
 	root_ = new ScrollView(ORIENT_VERTICAL);
 
@@ -204,11 +208,11 @@ void LogConfigScreen::CreateViews() {
 	LinearLayout *topbar = new LinearLayout(ORIENT_HORIZONTAL);
 	topbar->Add(new Choice(di->T("Back")))->OnClick.Handle<UIScreen>(this, &UIScreen::OnBack);
 	topbar->Add(new Choice(di->T("Toggle All")))->OnClick.Handle(this, &LogConfigScreen::OnToggleAll);
-	topbar->Add(new Choice(de->T("Log Level")))->OnClick.Handle(this, &LogConfigScreen::OnLogLevel);
+	topbar->Add(new Choice(dev->T("Log Level")))->OnClick.Handle(this, &LogConfigScreen::OnLogLevel);
 
 	vert->Add(topbar);
 
-	vert->Add(new ItemHeader(de->T("Logging Channels")));
+	vert->Add(new ItemHeader(dev->T("Logging Channels")));
 
 	LogManager *logMan = LogManager::GetInstance();
 
@@ -247,9 +251,9 @@ UI::EventReturn LogConfigScreen::OnLogLevelChange(UI::EventParams &e) {
 }
 
 UI::EventReturn LogConfigScreen::OnLogLevel(UI::EventParams &e) {
-	I18NCategory *de = GetI18NCategory("Developer");
+	I18NCategory *dev = GetI18NCategory("Developer");
 
-	auto logLevelScreen = new LogLevelScreen(de->T("Log Level"));
+	auto logLevelScreen = new LogLevelScreen(dev->T("Log Level"));
 	logLevelScreen->OnChoice.Handle(this, &LogConfigScreen::OnLogLevelChange);
 	screenManager()->push(logLevelScreen);
 	return UI::EVENT_DONE;
@@ -283,6 +287,8 @@ const char *GetCompilerABI() {
 	return "armeabi-v7a";
 #elif defined(ARM)
 	return "armeabi";
+#elif defined(ARM64)
+	return "arm64";
 #elif defined(_M_IX86)
 	return "x86";
 #elif defined(_M_X64)
@@ -294,7 +300,7 @@ const char *GetCompilerABI() {
 
 void SystemInfoScreen::CreateViews() {
 	// NOTE: Do not translate this section. It will change a lot and will be impossible to keep up.
-	I18NCategory *d = GetI18NCategory("Dialog");
+	I18NCategory *di = GetI18NCategory("Dialog");
 
 	using namespace UI;
 	root_ = new AnchorLayout(new LayoutParams(FILL_PARENT, FILL_PARENT));
@@ -302,7 +308,7 @@ void SystemInfoScreen::CreateViews() {
 	ViewGroup *leftColumn = new AnchorLayout(new LinearLayoutParams(1.0f));
 	root_->Add(leftColumn);
 
-	root_->Add(new Choice(d->T("Back"), "", false, new AnchorLayoutParams(225, 64, 10, NONE, NONE, 10)))->OnClick.Handle<UIScreen>(this, &UIScreen::OnBack);
+	AddStandardBack(root_);
 
 	TabHolder *tabHolder = new TabHolder(ORIENT_VERTICAL, 225, new AnchorLayoutParams(10, 0, 10, 0, false));
 
@@ -319,7 +325,7 @@ void SystemInfoScreen::CreateViews() {
 	deviceSpecs->Add(new InfoItem("ABI", GetCompilerABI()));
 	deviceSpecs->Add(new ItemHeader("CPU Information"));
 	deviceSpecs->Add(new InfoItem("Name", cpu_info.brand_string));
-#ifdef ARM
+#if defined(ARM) || defined(ARM64) || defined(MIPS)
 	deviceSpecs->Add(new InfoItem("Cores", StringFromInt(cpu_info.num_cores)));
 #else
 	int totalThreads = cpu_info.num_cores * cpu_info.logical_cpu_count;
@@ -331,7 +337,7 @@ void SystemInfoScreen::CreateViews() {
 	Thin3DContext *thin3d = screenManager()->getThin3DContext();
 
 	deviceSpecs->Add(new InfoItem("3D API", thin3d->GetInfoString(T3DInfo::APINAME)));
-	deviceSpecs->Add(new InfoItem("Vendor", thin3d->GetInfoString(T3DInfo::VENDOR)));
+	deviceSpecs->Add(new InfoItem("Vendor", std::string(thin3d->GetInfoString(T3DInfo::VENDORSTRING)) + " (" + thin3d->GetInfoString(T3DInfo::VENDOR) + ")"));
 	deviceSpecs->Add(new InfoItem("Model", thin3d->GetInfoString(T3DInfo::RENDERER)));
 #ifdef _WIN32
 	deviceSpecs->Add(new InfoItem("Driver Version", System_GetProperty(SYSPROP_GPUDRIVER_VERSION)));
@@ -356,8 +362,18 @@ void SystemInfoScreen::CreateViews() {
 
 
 	deviceSpecs->Add(new ItemHeader("Version Information"));
-	std::string apiVersion = thin3d->GetInfoString(T3DInfo::APIVERSION);
-	apiVersion.resize(30);
+	std::string apiVersion;
+	if (g_Config.iGPUBackend == GPU_BACKEND_OPENGL) {
+		if (gl_extensions.IsGLES) {
+			apiVersion = StringFromFormat("v%d.%d.%d ES", gl_extensions.ver[0], gl_extensions.ver[1], gl_extensions.ver[2]);
+		} else {
+			apiVersion = StringFromFormat("v%d.%d.%d", gl_extensions.ver[0], gl_extensions.ver[1], gl_extensions.ver[2]);
+		}
+	} else {
+		apiVersion = thin3d->GetInfoString(T3DInfo::APIVERSION);
+		if (apiVersion.size() > 30)
+			apiVersion.resize(30);
+	}
 	deviceSpecs->Add(new InfoItem("API Version", apiVersion));
 	deviceSpecs->Add(new InfoItem("Shading Language", thin3d->GetInfoString(T3DInfo::SHADELANGVERSION)));
 
@@ -375,20 +391,6 @@ void SystemInfoScreen::CreateViews() {
 	deviceSpecs->Add(new InfoItem("Display resolution", temp));
 #endif
 
-	if (gl_extensions.precision[0] != 0) {
-		const char *stypes[2] = { "Vertex", "Fragment" };
-		const char *ptypes[6] = { "LowF", "MediumF", "HighF", "LowI", "MediumI", "HighI" };
-
-		for (int st = 0; st < 2; st++) {
-			char bufValue[256], bufTitle[256];
-			for (int p = 0; p < 6; p++) {
-				snprintf(bufTitle, sizeof(bufTitle), "Precision %s %s:", stypes[st], ptypes[p]);
-				snprintf(bufValue, sizeof(bufValue), "(%i, %i): %i", gl_extensions.range[st][p][0], gl_extensions.range[st][p][1], gl_extensions.precision[st][p]);
-				deviceSpecs->Add(new InfoItem(bufTitle, bufValue, new LayoutParams(FILL_PARENT, 30)));
-			}
-		}
-	}
-
 	ViewGroup *cpuExtensionsScroll = new ScrollView(ORIENT_VERTICAL, new LinearLayoutParams(FILL_PARENT, FILL_PARENT));
 	LinearLayout *cpuExtensions = new LinearLayout(ORIENT_VERTICAL);
 	cpuExtensions->SetSpacing(0);
@@ -400,9 +402,9 @@ void SystemInfoScreen::CreateViews() {
 	std::vector<std::string> exts;
 	SplitString(cpu_info.Summarize(), ',', exts);
 	for (size_t i = 2; i < exts.size(); i++) {
-		cpuExtensions->Add(new TextView(exts[i]));
+		cpuExtensions->Add(new TextView(exts[i]))->SetFocusable(true);
 	}
-	
+
 	ViewGroup *oglExtensionsScroll = new ScrollView(ORIENT_VERTICAL, new LinearLayoutParams(FILL_PARENT, FILL_PARENT));
 	LinearLayout *oglExtensions = new LinearLayout(ORIENT_VERTICAL);
 	oglExtensions->SetSpacing(0);
@@ -410,20 +412,19 @@ void SystemInfoScreen::CreateViews() {
 
 	tabHolder->AddTab("OGL Extensions", oglExtensionsScroll);
 
-#ifndef USING_GLES2
-	oglExtensions->Add(new ItemHeader("OpenGL Extensions"));
-#else
-	if (gl_extensions.GLES3)
+	if (!gl_extensions.IsGLES) {
+		oglExtensions->Add(new ItemHeader("OpenGL Extensions"));
+	} else if (gl_extensions.GLES3) {
 		oglExtensions->Add(new ItemHeader("OpenGL ES 3.0 Extensions"));
-	else
+	} else {
 		oglExtensions->Add(new ItemHeader("OpenGL ES 2.0 Extensions"));
-#endif
+	}
 
 	exts.clear();
 	SplitString(g_all_gl_extensions, ' ', exts);
 	std::sort(exts.begin(), exts.end());
 	for (size_t i = 0; i < exts.size(); i++) {
-		oglExtensions->Add(new TextView(exts[i]));
+		oglExtensions->Add(new TextView(exts[i]))->SetFocusable(true);
 	}
 
 	exts.clear();
@@ -442,7 +443,7 @@ void SystemInfoScreen::CreateViews() {
 		eglExtensions->Add(new ItemHeader("EGL Extensions"));
 
 		for (size_t i = 0; i < exts.size(); i++) {
-			eglExtensions->Add(new TextView(exts[i]));
+			eglExtensions->Add(new TextView(exts[i]))->SetFocusable(true);
 		}
 	}
 }
@@ -450,9 +451,9 @@ void SystemInfoScreen::CreateViews() {
 void AddressPromptScreen::CreatePopupContents(UI::ViewGroup *parent) {
 	using namespace UI;
 
-	I18NCategory *de = GetI18NCategory("Developer");
+	I18NCategory *dev = GetI18NCategory("Developer");
 
-	addrView_ = new TextView(de->T("Enter address"), ALIGN_HCENTER, false);
+	addrView_ = new TextView(dev->T("Enter address"), ALIGN_HCENTER, false);
 	parent->Add(addrView_);
 
 	ViewGroup *grid = new GridLayout(GridLayoutSettings(60, 40));
@@ -465,7 +466,7 @@ void AddressPromptScreen::CreatePopupContents(UI::ViewGroup *parent) {
 		grid->Add(buttons_[i])->OnClick.Handle(this, &AddressPromptScreen::OnDigitButton);
 	}
 
-	parent->Add(new Button(de->T("Backspace")))->OnClick.Handle(this, &AddressPromptScreen::OnBackspace);
+	parent->Add(new Button(dev->T("Backspace")))->OnClick.Handle(this, &AddressPromptScreen::OnBackspace);
 }
 
 void AddressPromptScreen::OnCompleted(DialogResult result) {
@@ -504,14 +505,14 @@ void AddressPromptScreen::BackspaceDigit() {
 }
 
 void AddressPromptScreen::UpdatePreviewDigits() {
-	I18NCategory *de = GetI18NCategory("Developer");
+	I18NCategory *dev = GetI18NCategory("Developer");
 
 	if (addr_ != 0) {
 		char temp[32];
 		snprintf(temp, 32, "%8X", addr_);
 		addrView_->SetText(temp);
 	} else {
-		addrView_->SetText(de->T("Enter address"));
+		addrView_->SetText(dev->T("Enter address"));
 	}
 }
 
@@ -538,8 +539,8 @@ bool AddressPromptScreen::key(const KeyInput &key) {
 
 // Three panes: Block chooser, MIPS view, ARM/x86 view
 void JitCompareScreen::CreateViews() {
-	I18NCategory *d = GetI18NCategory("Dialog");
-	I18NCategory *de = GetI18NCategory("Developer");
+	I18NCategory *di = GetI18NCategory("Dialog");
+	I18NCategory *dev = GetI18NCategory("Developer");
 
 	using namespace UI;
 	
@@ -558,14 +559,16 @@ void JitCompareScreen::CreateViews() {
 	rightDisasm_ = rightColumn->Add(new LinearLayout(ORIENT_VERTICAL));
 	rightDisasm_->SetSpacing(0.0f);
 
-	leftColumn->Add(new Choice(de->T("Current")))->OnClick.Handle(this, &JitCompareScreen::OnCurrentBlock);
-	leftColumn->Add(new Choice(de->T("By Address")))->OnClick.Handle(this, &JitCompareScreen::OnSelectBlock);
-	leftColumn->Add(new Choice(de->T("Prev")))->OnClick.Handle(this, &JitCompareScreen::OnPrevBlock);
-	leftColumn->Add(new Choice(de->T("Next")))->OnClick.Handle(this, &JitCompareScreen::OnNextBlock);
-	leftColumn->Add(new Choice(de->T("Random")))->OnClick.Handle(this, &JitCompareScreen::OnRandomBlock);
-	leftColumn->Add(new Choice(de->T("Random VFPU")))->OnClick.Handle(this, &JitCompareScreen::OnRandomVFPUBlock);
-	leftColumn->Add(new Choice(d->T("Back")))->OnClick.Handle<UIScreen>(this, &UIScreen::OnBack);
-	blockName_ = leftColumn->Add(new TextView(de->T("No block")));
+	leftColumn->Add(new Choice(dev->T("Current")))->OnClick.Handle(this, &JitCompareScreen::OnCurrentBlock);
+	leftColumn->Add(new Choice(dev->T("By Address")))->OnClick.Handle(this, &JitCompareScreen::OnSelectBlock);
+	leftColumn->Add(new Choice(dev->T("Prev")))->OnClick.Handle(this, &JitCompareScreen::OnPrevBlock);
+	leftColumn->Add(new Choice(dev->T("Next")))->OnClick.Handle(this, &JitCompareScreen::OnNextBlock);
+	leftColumn->Add(new Choice(dev->T("Random")))->OnClick.Handle(this, &JitCompareScreen::OnRandomBlock);
+	leftColumn->Add(new Choice(dev->T("FPU")))->OnClick.Handle(this, &JitCompareScreen::OnRandomFPUBlock);
+	leftColumn->Add(new Choice(dev->T("VFPU")))->OnClick.Handle(this, &JitCompareScreen::OnRandomVFPUBlock);
+	leftColumn->Add(new Choice(dev->T("Stats")))->OnClick.Handle(this, &JitCompareScreen::OnShowStats);
+	leftColumn->Add(new Choice(di->T("Back")))->OnClick.Handle<UIScreen>(this, &UIScreen::OnBack);
+	blockName_ = leftColumn->Add(new TextView(dev->T("No block")));
 	blockAddr_ = leftColumn->Add(new TextEdit("", "", new LayoutParams(FILL_PARENT, WRAP_CONTENT)));
 	blockAddr_->OnTextChange.Handle(this, &JitCompareScreen::OnAddressChange);
 	blockStats_ = leftColumn->Add(new TextView(""));
@@ -580,7 +583,7 @@ void JitCompareScreen::UpdateDisasm() {
 
 	using namespace UI;
 
-	I18NCategory *de = GetI18NCategory("Developer");
+	I18NCategory *dev = GetI18NCategory("Developer");
 
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
 
@@ -589,8 +592,8 @@ void JitCompareScreen::UpdateDisasm() {
 	blockName_->SetText(temp);
 
 	if (currentBlock_ < 0 || currentBlock_ >= blockCache->GetNumBlocks()) {
-		leftDisasm_->Add(new TextView(de->T("No block")));
-		rightDisasm_->Add(new TextView(de->T("No block")));
+		leftDisasm_->Add(new TextView(dev->T("No block")));
+		rightDisasm_->Add(new TextView(dev->T("No block")));
 		blockStats_->SetText("");
 		return;
 	}
@@ -607,17 +610,21 @@ void JitCompareScreen::UpdateDisasm() {
 		char temp[256];
 		MIPSDisAsm(Memory::Read_Instruction(addr), addr, temp, true);
 		std::string mipsDis = temp;
-		leftDisasm_->Add(new TextView(mipsDis));
+		leftDisasm_->Add(new TextView(mipsDis))->SetFocusable(true);
 	}
 
 #if defined(ARM)
 	std::vector<std::string> targetDis = DisassembleArm2(block->normalEntry, block->codeSize);
-#else
+#elif defined(ARM64)
+	std::vector<std::string> targetDis = DisassembleArm64(block->normalEntry, block->codeSize);
+#elif defined(_M_IX86) || defined(_M_X64)
 	std::vector<std::string> targetDis = DisassembleX86(block->normalEntry, block->codeSize);
 #endif
+#if defined(ARM) || defined(ARM64) || defined(_M_IX86) || defined(_M_X64)
 	for (size_t i = 0; i < targetDis.size(); i++) {
-		rightDisasm_->Add(new TextView(targetDis[i]));
+		rightDisasm_->Add(new TextView(targetDis[i]))->SetFocusable(true);
 	}
+#endif
 
 	int numMips = leftDisasm_->GetNumSubviews();
 	int numHost = rightDisasm_->GetNumSubviews();
@@ -627,6 +634,9 @@ void JitCompareScreen::UpdateDisasm() {
 }
 
 UI::EventReturn JitCompareScreen::OnAddressChange(UI::EventParams &e) {
+	if (!MIPSComp::jit) {
+		return UI::EVENT_DONE;
+	}
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
 	u32 addr;
 	if (blockAddr_->GetText().size() > 8)
@@ -640,10 +650,33 @@ UI::EventReturn JitCompareScreen::OnAddressChange(UI::EventParams &e) {
 	return UI::EVENT_DONE;
 }
 
-UI::EventReturn JitCompareScreen::OnSelectBlock(UI::EventParams &e) {
-	I18NCategory *de = GetI18NCategory("Developer");
+UI::EventReturn JitCompareScreen::OnShowStats(UI::EventParams &e) {
+	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
+	BlockCacheStats bcStats;
+	blockCache->ComputeStats(bcStats);
+	NOTICE_LOG(JIT, "Num blocks: %i", bcStats.numBlocks);
+	NOTICE_LOG(JIT, "Average Bloat: %0.2f%%", 100 * bcStats.avgBloat);
+	NOTICE_LOG(JIT, "Min Bloat: %0.2f%%  (%08x)", 100 * bcStats.minBloat, bcStats.minBloatBlock);
+	NOTICE_LOG(JIT, "Max Bloat: %0.2f%%  (%08x)", 100 * bcStats.maxBloat, bcStats.maxBloatBlock);
 
-	auto addressPrompt = new AddressPromptScreen(de->T("Block address"));
+	int ctr = 0, sz = (int)bcStats.bloatMap.size();
+	for (auto iter : bcStats.bloatMap) {
+		if (ctr < 10 || ctr > sz - 10) {
+			NOTICE_LOG(JIT, "%08x: %f", iter.second, iter.first);
+		} else if (ctr == 10) {
+			NOTICE_LOG(JIT, "...");
+		}
+		ctr++;
+	}
+
+	return UI::EVENT_DONE;
+}
+
+
+UI::EventReturn JitCompareScreen::OnSelectBlock(UI::EventParams &e) {
+	I18NCategory *dev = GetI18NCategory("Developer");
+
+	auto addressPrompt = new AddressPromptScreen(dev->T("Block address"));
 	addressPrompt->OnChoice.Handle(this, &JitCompareScreen::OnBlockAddress);
 	screenManager()->push(addressPrompt);
 	return UI::EVENT_DONE;
@@ -662,6 +695,10 @@ UI::EventReturn JitCompareScreen::OnNextBlock(UI::EventParams &e) {
 }
 
 UI::EventReturn JitCompareScreen::OnBlockAddress(UI::EventParams &e) {
+	if (!MIPSComp::jit) {
+		return UI::EVENT_DONE;
+	}
+
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
 	if (Memory::IsValidAddress(e.a)) {
 		currentBlock_ = blockCache->GetBlockNumberFromStartAddress(e.a);
@@ -673,6 +710,10 @@ UI::EventReturn JitCompareScreen::OnBlockAddress(UI::EventParams &e) {
 }
 
 UI::EventReturn JitCompareScreen::OnRandomBlock(UI::EventParams &e) {
+	if (!MIPSComp::jit) {
+		return UI::EVENT_DONE;
+	}
+
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
 	int numBlocks = blockCache->GetNumBlocks();
 	if (numBlocks > 0) {
@@ -683,21 +724,34 @@ UI::EventReturn JitCompareScreen::OnRandomBlock(UI::EventParams &e) {
 }
 
 UI::EventReturn JitCompareScreen::OnRandomVFPUBlock(UI::EventParams &e) {
+	OnRandomBlock(IS_VFPU);
+	return UI::EVENT_DONE;
+}
+
+UI::EventReturn JitCompareScreen::OnRandomFPUBlock(UI::EventParams &e) {
+	OnRandomBlock(IS_FPU);
+	return UI::EVENT_DONE;
+}
+
+void JitCompareScreen::OnRandomBlock(int flag) {
+	if (!MIPSComp::jit) {
+		return;
+	}
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
 	int numBlocks = blockCache->GetNumBlocks();
 	if (numBlocks > 0) {
-		bool anyVFPU = false;
+		bool anyWanted = false;
 		int tries = 0;
-		while (!anyVFPU && tries < 10000) {
+		while (!anyWanted && tries < 10000) {
 			currentBlock_ = rand() % numBlocks;
 			const JitBlock *b = blockCache->GetBlock(currentBlock_);
 			for (u32 addr = b->originalAddress; addr <= b->originalAddress + b->originalSize; addr += 4) {
 				MIPSOpcode opcode = Memory::Read_Instruction(addr);
-				if (MIPSGetInfo(opcode) & IS_VFPU) {
+				if (MIPSGetInfo(opcode) & flag) {
 					char temp[256];
 					MIPSDisAsm(opcode, addr, temp);
 					// INFO_LOG(HLE, "Stopping VFPU instruction: %s", temp);
-					anyVFPU = true;
+					anyWanted = true;
 					break;
 				}
 			}
@@ -705,11 +759,13 @@ UI::EventReturn JitCompareScreen::OnRandomVFPUBlock(UI::EventParams &e) {
 		}
 	}
 	UpdateDisasm();
-	return UI::EVENT_DONE;
 }
 
 
 UI::EventReturn JitCompareScreen::OnCurrentBlock(UI::EventParams &e) {
+	if (!MIPSComp::jit) {
+		return UI::EVENT_DONE;
+	}
 	JitBlockCache *blockCache = MIPSComp::jit->GetBlockCache();
 	std::vector<int> blockNum;
 	blockCache->GetBlockNumbersFromAddress(currentMIPS->pc, &blockNum);
@@ -720,4 +776,175 @@ UI::EventReturn JitCompareScreen::OnCurrentBlock(UI::EventParams &e) {
 	}
 	UpdateDisasm();
 	return UI::EVENT_DONE;
+}
+
+static const uint32_t nice_colors[] = {
+	0xFF8040,
+	0x80FF40,
+	0x8040FF,
+	0xFFFF40,
+
+	0x40FFFF,
+	0xFF70FF,
+	0xc0c0c0,
+	0xb040c0,
+
+	0x184099,
+	0xCC3333,
+	0xFF99CC,
+	0x3399CC,
+
+	0x990000,
+	0x003366,
+	0xF8F8F8,
+	0x33FFFF,
+};
+
+enum ProfileCatStatus {
+	PROFILE_CAT_VISIBLE = 0,
+	PROFILE_CAT_IGNORE = 1,
+	PROFILE_CAT_NOLEGEND = 2,
+};
+
+void DrawProfile(UIContext &ui) {
+#ifdef USE_PROFILER
+	int numCategories = Profiler_GetNumCategories();
+	int historyLength = Profiler_GetHistoryLength();
+
+	ui.SetFontStyle(ui.theme->uiFont);
+
+	static float lastMaxVal = 1.0f / 60.0f;
+	float legendMinVal = lastMaxVal * (1.0f / 120.0f);
+
+	std::vector<float> history;
+	std::vector<ProfileCatStatus> catStatus;
+	history.resize(historyLength);
+	catStatus.resize(numCategories);
+
+	float rowH = 30.0f;
+	float legendHeight = 0.0f;
+	float legendWidth = 80.0f;
+	for (int i = 0; i < numCategories; i++) {
+		const char *name = Profiler_GetCategoryName(i);
+		if (!strcmp(name, "timing")) {
+			catStatus[i] = PROFILE_CAT_IGNORE;
+			continue;
+		}
+
+		Profiler_GetHistory(i, &history[0], historyLength);
+		catStatus[i] = PROFILE_CAT_NOLEGEND;
+		for (int j = 0; j < historyLength; ++j) {
+			if (history[j] > legendMinVal) {
+				catStatus[i] = PROFILE_CAT_VISIBLE;
+				break;
+			}
+		}
+
+		// So they don't move horizontally, we always measure.
+		float w = 0.0f, h = 0.0f;
+		ui.MeasureText(ui.GetFontStyle(), name, &w, &h);
+		if (w > legendWidth) {
+			legendWidth = w;
+		}
+		legendHeight += rowH;
+	}
+	legendWidth += 20.0f;
+
+	float legendStartY = legendHeight > ui.GetBounds().centerY() ? ui.GetBounds().y2() - legendHeight : ui.GetBounds().centerY();
+	float legendStartX = ui.GetBounds().x2() - std::min(legendWidth, 200.0f);
+
+	const uint32_t opacity = 140 << 24;
+
+	int legendNum = 0;
+	for (int i = 0; i < numCategories; i++) {
+		const char *name = Profiler_GetCategoryName(i);
+		uint32_t color = nice_colors[i % ARRAY_SIZE(nice_colors)];
+
+		if (catStatus[i] == PROFILE_CAT_VISIBLE) {
+			float y = legendStartY + legendNum++ * rowH;
+			ui.FillRect(UI::Drawable(opacity | color), Bounds(legendStartX, y, rowH - 2, rowH - 2));
+			ui.DrawTextShadow(name, legendStartX + rowH + 2, y, 0xFFFFFFFF, ALIGN_VBASELINE);
+		}
+	}
+
+	float graphWidth = ui.GetBounds().x2() - legendWidth - 20.0f;
+	float graphHeight = ui.GetBounds().h * 0.8f;
+
+	float dx = graphWidth / historyLength;
+
+	/*
+	ui.Flush();
+
+	ui.BeginNoTex();
+	*/
+
+	bool area = true;
+	float minVal = 0.0f;
+	float maxVal = lastMaxVal;  // TODO - adjust to frame length
+	if (maxVal < 0.001f)
+		maxVal = 0.001f;
+	if (maxVal > 1.0f / 15.0f)
+		maxVal = 1.0f / 15.0f;
+
+	float scale = (graphHeight) / (maxVal - minVal);
+
+	float y_60th = ui.GetBounds().y2() - 10 - (1.0f / 60.0f) * scale;
+	float y_1ms = ui.GetBounds().y2() - 10 - (1.0f / 1000.0f) * scale;
+
+	ui.FillRect(UI::Drawable(0x80FFFF00), Bounds(0, y_60th, graphWidth, 2));
+	ui.FillRect(UI::Drawable(0x80FFFF00), Bounds(0, y_1ms, graphWidth, 2));
+	ui.DrawTextShadow("1/60s", 5, y_60th, 0x80FFFF00);
+	ui.DrawTextShadow("1ms", 5, y_1ms, 0x80FFFF00);
+
+	std::vector<float> total;
+	total.resize(historyLength);
+
+	maxVal = 0.0f;
+	float maxTotal = 0.0f;
+	for (int i = 0; i < numCategories; i++) {
+		if (catStatus[i] == PROFILE_CAT_IGNORE) {
+			continue;
+		}
+		Profiler_GetHistory(i, &history[0], historyLength);
+
+		float x = 10;
+		uint32_t col = nice_colors[i % ARRAY_SIZE(nice_colors)];
+		if (area)
+			col = opacity | (col & 0xFFFFFF);
+		UI::Drawable color(col);
+		UI::Drawable outline((opacity >> 1) | 0xFFFFFF);
+
+		if (area) {
+			for (int n = 0; n < historyLength; n++) {
+				float val = history[n];
+				float valY1 = ui.GetBounds().y2() - 10 - (val + total[n]) * scale;
+				float valY2 = ui.GetBounds().y2() - 10 - total[n] * scale;
+				ui.FillRect(outline, Bounds(x, valY2, dx, 1.0f));
+				ui.FillRect(color, Bounds(x, valY1, dx, valY2 - valY1));
+				x += dx;
+				total[n] += val;
+			}
+		} else {
+			for (int n = 0; n < historyLength; n++) {
+				float val = history[n];
+				if (val > maxVal)
+					maxVal = val;
+				float valY = ui.GetBounds().y2() - 10 - history[n] * scale;
+				ui.FillRect(color, Bounds(x, valY, dx, 5));
+				x += dx;
+			}
+		}
+	}
+
+	for (int n = 0; n < historyLength; n++) {
+		if (total[n] > maxTotal)
+			maxTotal = total[n];
+	}
+
+	if (area) {
+		maxVal = maxTotal;
+	}
+
+	lastMaxVal = lastMaxVal * 0.95f + maxVal * 0.05f;
+#endif
 }

@@ -19,7 +19,7 @@
 #include <algorithm>
 #include <set>
 
-#include "native/base/stringutil.h"
+#include "base/stringutil.h"
 #include "Common/ChunkFile.h"
 #include "Common/FileUtil.h"
 #include "Core/Config.h"
@@ -41,7 +41,7 @@
 #include "Core/CoreTiming.h"
 #include "Core/PSPLoaders.h"
 #include "Core/System.h"
-#include "Core/MemMap.h"
+#include "Core/MemMapHelpers.h"
 #include "Core/Debugger/SymbolMap.h"
 #include "Core/MIPS/MIPS.h"
 

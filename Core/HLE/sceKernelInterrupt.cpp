@@ -19,6 +19,7 @@
 #include <list>
 #include <map>
 
+#include "Core/MemMapHelpers.h"
 #include "Core/Reporting.h"
 #include "Core/HLE/HLE.h"
 #include "Core/HLE/FunctionWrappers.h"
@@ -31,7 +32,9 @@
 #include "Core/HLE/sceKernelInterrupt.h"
 #include "Core/HLE/sceKernelMemory.h"
 #include "Core/HLE/sceKernelMutex.h"
+
 #include "GPU/GPUCommon.h"
+#include "GPU/GPUState.h"
 
 void __DisableInterrupts();
 void __EnableInterrupts();

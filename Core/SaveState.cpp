@@ -293,16 +293,38 @@ namespace SaveState
 	static const char *SCREENSHOT_EXTENSION = "jpg";
 	// Slot utilities
 
-	std::string GenerateSaveSlotFilename(int slot, const char *extension)
+	std::string GenerateSaveSlotFilename(const std::string &gameFilename, int slot, const char *extension)
 	{
-		char discID[256];
-		char temp[2048];
-		snprintf(discID, sizeof(discID), "%s_%s",
-			g_paramSFO.GetValueString("DISC_ID").c_str(),
-			g_paramSFO.GetValueString("DISC_VERSION").c_str());
-		snprintf(temp, sizeof(temp), "ms0:/PSP/PPSSPP_STATE/%s_%i.%s", discID, slot, extension);
+		std::string discId = g_paramSFO.GetValueString("DISC_ID");
+		std::string fullDiscId;
+		if (discId.size()) {
+			fullDiscId = StringFromFormat("%s_%s",
+				g_paramSFO.GetValueString("DISC_ID").c_str(),
+				g_paramSFO.GetValueString("DISC_VERSION").c_str());
+		} else {
+			// Okay, no discId. Probably homebrew, let's use the last part of the path name.
+			if (File::IsDirectory(gameFilename)) {
+				// EBOOT.PBP directory, most likely.
+				std::string path = gameFilename;
+				size_t slash = path.rfind('/');  // Always '/', not '\\', as we're in a virtual directory
+				if (slash != std::string::npos && slash < path.size() - 1)
+					path = path.substr(slash + 1);
+				fullDiscId = path;
+			} else {
+				// Probably a loose elf.
+				std::string fn = File::GetFilename(gameFilename);
+				size_t dot = fn.rfind('.');
+				if (dot != std::string::npos) {
+					fullDiscId = fn.substr(0, dot);
+				} else {
+					fullDiscId = "elf";  // Fallback
+				}
+			}
+		}
+
+		std::string temp = StringFromFormat("ms0:/PSP/PPSSPP_STATE/%s_%i.%s", fullDiscId.c_str(), slot, extension);
 		std::string hostPath;
-		if (pspFileSystem.GetHostPath(std::string(temp), hostPath)) {
+		if (pspFileSystem.GetHostPath(temp, hostPath)) {
 			return hostPath;
 		} else {
 			return "";
@@ -318,15 +340,14 @@ namespace SaveState
 	{
 		I18NCategory *sy = GetI18NCategory("System");
 		g_Config.iCurrentStateSlot = (g_Config.iCurrentStateSlot + 1) % SaveState::SAVESTATESLOTS;
-		char msg[128];
-		snprintf(msg, sizeof(msg), "%s: %d", sy->T("Savestate Slot"), g_Config.iCurrentStateSlot + 1);
+		std::string msg = StringFromFormat("%s: %d", sy->T("Savestate Slot"), g_Config.iCurrentStateSlot + 1);
 		osm.Show(msg);
 		NativeMessageReceived("slotchanged", "");
 	}
 
-	void LoadSlot(int slot, Callback callback, void *cbUserData)
+	void LoadSlot(const std::string &gameFilename, int slot, Callback callback, void *cbUserData)
 	{
-		std::string fn = GenerateSaveSlotFilename(slot, STATE_EXTENSION);
+		std::string fn = GenerateSaveSlotFilename(gameFilename, slot, STATE_EXTENSION);
 		if (!fn.empty()) {
 			Load(fn, callback, cbUserData);
 		} else {
@@ -337,10 +358,10 @@ namespace SaveState
 		}
 	}
 
-	void SaveSlot(int slot, Callback callback, void *cbUserData)
+	void SaveSlot(const std::string &gameFilename, int slot, Callback callback, void *cbUserData)
 	{
-		std::string fn = GenerateSaveSlotFilename(slot, STATE_EXTENSION);
-		std::string shot = GenerateSaveSlotFilename(slot, SCREENSHOT_EXTENSION);
+		std::string fn = GenerateSaveSlotFilename(gameFilename, slot, STATE_EXTENSION);
+		std::string shot = GenerateSaveSlotFilename(gameFilename, slot, SCREENSHOT_EXTENSION);
 		if (!fn.empty()) {
 			auto renameCallback = [=](bool status, void *data) {
 				if (status) {
@@ -357,22 +378,22 @@ namespace SaveState
 			SaveScreenshot(shot, Callback(), 0);
 			Save(fn + ".tmp", renameCallback, cbUserData);
 		} else {
-			I18NCategory *s = GetI18NCategory("Screen");
+			I18NCategory *sc = GetI18NCategory("Screen");
 			osm.Show("Failed to save state. Error in the file system.", 2.0);
 			if (callback)
 				callback(false, cbUserData);
 		}
 	}
 
-	bool HasSaveInSlot(int slot)
+	bool HasSaveInSlot(const std::string &gameFilename, int slot)
 	{
-		std::string fn = GenerateSaveSlotFilename(slot, STATE_EXTENSION);
+		std::string fn = GenerateSaveSlotFilename(gameFilename, slot, STATE_EXTENSION);
 		return File::Exists(fn);
 	}
 
-	bool HasScreenshotInSlot(int slot)
+	bool HasScreenshotInSlot(const std::string &gameFilename, int slot)
 	{
-		std::string fn = GenerateSaveSlotFilename(slot, SCREENSHOT_EXTENSION);
+		std::string fn = GenerateSaveSlotFilename(gameFilename, slot, SCREENSHOT_EXTENSION);
 		return File::Exists(fn);
 	}
 
@@ -392,11 +413,11 @@ namespace SaveState
 		return false;
 	}
 
-	int GetNewestSlot() {
+	int GetNewestSlot(const std::string &gameFilename) {
 		int newestSlot = -1;
 		tm newestDate = {0};
 		for (int i = 0; i < SAVESTATESLOTS; i++) {
-			std::string fn = GenerateSaveSlotFilename(i, STATE_EXTENSION);
+			std::string fn = GenerateSaveSlotFilename(gameFilename, i, STATE_EXTENSION);
 			if (File::Exists(fn)) {
 				tm time;
 				bool success = File::GetModifTime(fn, time);
@@ -409,8 +430,8 @@ namespace SaveState
 		return newestSlot;
 	}
 
-	std::string GetSlotDateAsString(int slot) {
-		std::string fn = GenerateSaveSlotFilename(slot, STATE_EXTENSION);
+	std::string GetSlotDateAsString(const std::string &gameFilename, int slot) {
+		std::string fn = GenerateSaveSlotFilename(gameFilename, slot, STATE_EXTENSION);
 		if (File::Exists(fn)) {
 			tm time;
 			if (File::GetModifTime(fn, time)) {
@@ -508,14 +529,13 @@ namespace SaveState
 			bool callbackResult;
 			std::string reason;
 
-			I18NCategory *s = GetI18NCategory("Screen");
-			// I couldn't stand the inconsistency.  But trying not to break old lang files.
-			const char *i18nLoadFailure = s->T("Load savestate failed", "");
-			const char *i18nSaveFailure = s->T("Save State Failed", "");
+			I18NCategory *sc = GetI18NCategory("Screen");
+			const char *i18nLoadFailure = sc->T("Load savestate failed", "");
+			const char *i18nSaveFailure = sc->T("Save State Failed", "");
 			if (strlen(i18nLoadFailure) == 0)
-				i18nLoadFailure = s->T("Failed to load state");
+				i18nLoadFailure = sc->T("Failed to load state");
 			if (strlen(i18nSaveFailure) == 0)
-				i18nSaveFailure = s->T("Failed to save state");
+				i18nSaveFailure = sc->T("Failed to save state");
 
 			switch (op.type)
 			{
@@ -523,7 +543,7 @@ namespace SaveState
 				INFO_LOG(COMMON, "Loading state from %s", op.filename.c_str());
 				result = CChunkFileReader::Load(op.filename, REVISION, PPSSPP_GIT_VERSION, state, &reason);
 				if (result == CChunkFileReader::ERROR_NONE) {
-					osm.Show(s->T("Loaded State"), 2.0);
+					osm.Show(sc->T("Loaded State"), 2.0);
 					callbackResult = true;
 					hasLoadedState = true;
 				} else if (result == CChunkFileReader::ERROR_BROKEN_STATE) {
@@ -532,7 +552,7 @@ namespace SaveState
 					ERROR_LOG(COMMON, "Load state failure: %s", reason.c_str());
 					callbackResult = false;
 				} else {
-					osm.Show(s->T(reason.c_str(), i18nLoadFailure), 2.0);
+					osm.Show(sc->T(reason.c_str(), i18nLoadFailure), 2.0);
 					callbackResult = false;
 				}
 				break;
@@ -542,7 +562,7 @@ namespace SaveState
 				result = CChunkFileReader::Save(op.filename, REVISION, PPSSPP_GIT_VERSION, state);
 				if (result == CChunkFileReader::ERROR_NONE) {
 
-					osm.Show(s->T("Saved State"), 2.0);
+					osm.Show(sc->T("Saved State"), 2.0);
 					callbackResult = true;
 				} else if (result == CChunkFileReader::ERROR_BROKEN_STATE) {
 					HandleFailure();
@@ -564,14 +584,14 @@ namespace SaveState
 				INFO_LOG(COMMON, "Rewinding to recent savestate snapshot");
 				result = rewindStates.Restore();
 				if (result == CChunkFileReader::ERROR_NONE) {
-					osm.Show(s->T("Loaded State"), 2.0);
+					osm.Show(sc->T("Loaded State"), 2.0);
 					callbackResult = true;
 					hasLoadedState = true;
 				} else if (result == CChunkFileReader::ERROR_BROKEN_STATE) {
 					// Cripes.  Good news is, we might have more.  Let's try those too, better than a reset.
 					if (HandleFailure()) {
 						// Well, we did rewind, even if too much...
-						osm.Show(s->T("Loaded State"), 2.0);
+						osm.Show(sc->T("Loaded State"), 2.0);
 						callbackResult = true;
 						hasLoadedState = true;
 					} else {
